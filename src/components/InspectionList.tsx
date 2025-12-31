@@ -2,13 +2,18 @@ import { useState, useEffect } from 'react';
 import { collection, query, orderBy, getDocs, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { FinalInspection } from '../types';
-import { Trash2, Eye, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle } from 'lucide-react';
+import { generateFinalInspectionPDF } from '../lib/pdfGenerator';
+import { emailSettingsService } from '../lib/emailSettingsService';
+import { Trash2, Eye, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle, Download, Mail, FileText } from 'lucide-react';
 
 export function InspectionList() {
   const [inspections, setInspections] = useState<(FinalInspection & { id: string })[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [generatingPdf, setGeneratingPdf] = useState<string | null>(null);
+  const [sendingEmail, setSendingEmail] = useState<string | null>(null);
+  const [previewInspection, setPreviewInspection] = useState<(FinalInspection & { id: string }) | null>(null);
 
   useEffect(() => {
     fetchInspections();
@@ -45,6 +50,118 @@ export function InspectionList() {
       alert('Failed to delete inspection');
     } finally {
       setDeleting(null);
+    }
+  };
+
+  const handleDownloadPdf = async (inspection: FinalInspection & { id: string }) => {
+    setGeneratingPdf(inspection.id);
+    try {
+      const pdfBase64 = await generateFinalInspectionPDF(inspection);
+      const link = document.createElement('a');
+      link.href = `data:application/pdf;base64,${pdfBase64}`;
+      link.download = `Final_Inspection_${inspection.customerName}_${inspection.inspectionDate}.pdf`;
+      link.click();
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      alert('Failed to generate PDF');
+    } finally {
+      setGeneratingPdf(null);
+    }
+  };
+
+  const handleResendEmail = async (inspection: FinalInspection & { id: string }) => {
+    const recipients = emailSettingsService.getRecipients();
+    if (recipients.length === 0) {
+      alert('No email recipients configured. Please go to Settings to add recipients.');
+      return;
+    }
+
+    setSendingEmail(inspection.id);
+    try {
+      const pdfBase64 = await generateFinalInspectionPDF(inspection);
+
+      const resultColor = inspection.inspectionResult === 'PASS' ? '#22c55e' : '#ef4444';
+      const emailHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 20px; text-align: center;">
+            <h1 style="color: white; margin: 0;">Eastern Mills</h1>
+            <p style="color: rgba(255,255,255,0.9); margin: 5px 0 0 0;">Final Inspection Report</p>
+          </div>
+
+          <div style="padding: 20px; background: #f9fafb;">
+            <div style="background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+              <h2 style="margin: 0 0 15px 0; color: #111827; font-size: 18px;">
+                Result: <span style="color: ${resultColor}; font-weight: bold;">${inspection.inspectionResult}</span>
+              </h2>
+
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 8px 0; color: #6b7280; width: 40%;">Customer:</td>
+                  <td style="padding: 8px 0; color: #111827; font-weight: 500;">${inspection.customerName}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; color: #6b7280;">Design:</td>
+                  <td style="padding: 8px 0; color: #111827; font-weight: 500;">${inspection.buyerDesignName}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; color: #6b7280;">OPS No:</td>
+                  <td style="padding: 8px 0; color: #111827; font-weight: 500;">${inspection.opsNo}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; color: #6b7280;">Inspection Date:</td>
+                  <td style="padding: 8px 0; color: #111827; font-weight: 500;">${inspection.inspectionDate}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; color: #6b7280;">Inspector:</td>
+                  <td style="padding: 8px 0; color: #111827; font-weight: 500;">${inspection.qcInspectorName}</td>
+                </tr>
+              </table>
+            </div>
+
+            <div style="background: white; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+              <h3 style="margin: 0 0 15px 0; color: #111827; font-size: 16px;">Quantities</h3>
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 8px 0; color: #6b7280;">Accepted:</td>
+                  <td style="padding: 8px 0; color: #22c55e; font-weight: bold;">${inspection.acceptedQty}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; color: #6b7280;">Rejected:</td>
+                  <td style="padding: 8px 0; color: #ef4444; font-weight: bold;">${inspection.rejectedQty}</td>
+                </tr>
+              </table>
+            </div>
+          </div>
+
+          <div style="padding: 15px; text-align: center; color: #6b7280; font-size: 12px;">
+            <p>This is an automated email from Eastern Mills QC System</p>
+          </div>
+        </div>
+      `;
+
+      const response = await fetch('/.netlify/functions/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: recipients,
+          subject: `Final Inspection Report - ${inspection.customerName} - ${inspection.inspectionResult}`,
+          html: emailHtml,
+          pdfBase64,
+          pdfFilename: `Final_Inspection_${inspection.customerName}_${inspection.inspectionDate}.pdf`
+        })
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        alert('Email sent successfully!');
+      } else {
+        throw new Error(result.error || 'Failed to send email');
+      }
+    } catch (error) {
+      console.error('Error sending email:', error);
+      alert('Failed to send email: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    } finally {
+      setSendingEmail(null);
     }
   };
 
@@ -104,7 +221,48 @@ export function InspectionList() {
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
+              {/* Action Buttons */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPreviewInspection(inspection);
+                }}
+                className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                title="Preview"
+              >
+                <FileText size={18} />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDownloadPdf(inspection);
+                }}
+                disabled={generatingPdf === inspection.id}
+                className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                title="Download PDF"
+              >
+                {generatingPdf === inspection.id ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Download size={18} />
+                )}
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleResendEmail(inspection);
+                }}
+                disabled={sendingEmail === inspection.id}
+                className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                title="Resend Email"
+              >
+                {sendingEmail === inspection.id ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Mail size={18} />
+                )}
+              </button>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -112,6 +270,7 @@ export function InspectionList() {
                 }}
                 disabled={deleting === inspection.id}
                 className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                title="Delete"
               >
                 {deleting === inspection.id ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -288,6 +447,142 @@ export function InspectionList() {
           )}
         </div>
       ))}
+
+      {/* Preview Modal */}
+      {previewInspection && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-emerald-600 text-white p-4 flex justify-between items-center">
+              <h3 className="text-lg font-semibold">Final Inspection Preview</h3>
+              <button
+                onClick={() => setPreviewInspection(null)}
+                className="text-white hover:bg-emerald-700 rounded-lg p-1"
+              >
+                <XCircle size={24} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* Result Badge */}
+              <div className="text-center">
+                <span className={`inline-block px-6 py-2 rounded-full text-lg font-bold ${
+                  previewInspection.inspectionResult === 'PASS'
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-red-100 text-red-700'
+                }`}>
+                  {previewInspection.inspectionResult === 'PASS' ? 'PASSED' : 'FAILED'}
+                </span>
+              </div>
+
+              {/* Order Info */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h4 className="font-semibold text-emerald-700 mb-3">Order Information</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div><span className="text-gray-500">Customer:</span> <span className="font-medium">{previewInspection.customerName}</span></div>
+                  <div><span className="text-gray-500">Code:</span> <span className="font-medium">{previewInspection.customerCode}</span></div>
+                  <div><span className="text-gray-500">PO No:</span> <span className="font-medium">{previewInspection.customerPoNo}</span></div>
+                  <div><span className="text-gray-500">OPS No:</span> <span className="font-medium">{previewInspection.opsNo}</span></div>
+                  <div><span className="text-gray-500">Buyer Design:</span> <span className="font-medium">{previewInspection.buyerDesignName}</span></div>
+                  <div><span className="text-gray-500">EMPL Design:</span> <span className="font-medium">{previewInspection.emplDesignNo}</span></div>
+                  <div><span className="text-gray-500">Color:</span> <span className="font-medium">{previewInspection.colorName}</span></div>
+                  <div><span className="text-gray-500">Sizes:</span> <span className="font-medium">{previewInspection.productSizes}</span></div>
+                </div>
+              </div>
+
+              {/* Quantities */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h4 className="font-semibold text-emerald-700 mb-3">Inspection Quantities</h4>
+                <div className="grid grid-cols-3 gap-4 text-center">
+                  <div className="bg-white rounded-lg p-3">
+                    <div className="text-2xl font-bold text-gray-800">{previewInspection.totalOrderQty}</div>
+                    <div className="text-xs text-gray-500">Total Order</div>
+                  </div>
+                  <div className="bg-green-50 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-green-600">{previewInspection.acceptedQty}</div>
+                    <div className="text-xs text-gray-500">Accepted</div>
+                  </div>
+                  <div className="bg-red-50 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-red-600">{previewInspection.rejectedQty}</div>
+                    <div className="text-xs text-gray-500">Rejected</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quality Checks */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h4 className="font-semibold text-emerald-700 mb-3">Quality Checks</h4>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Carton Dimension:</span>
+                    <span className={previewInspection.cartonDimension === 'OK' ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                      {previewInspection.cartonDimension}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Product Label:</span>
+                    <span className={previewInspection.productLabel === 'OK' ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                      {previewInspection.productLabel}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Carton Label:</span>
+                    <span className={previewInspection.cartonLabel === 'OK' ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                      {previewInspection.cartonLabel}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Barcode:</span>
+                    <span className={previewInspection.barcodeScan === 'OK' ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                      {previewInspection.barcodeScan}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Remarks */}
+              {previewInspection.qcInspectorRemarks && (
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <h4 className="font-semibold text-emerald-700 mb-2">QC Remarks</h4>
+                  <p className="text-gray-700">{previewInspection.qcInspectorRemarks}</p>
+                </div>
+              )}
+
+              {/* Footer */}
+              <div className="border-t pt-4 text-sm text-gray-500 text-center">
+                <p>Inspected by: {previewInspection.qcInspectorName} | Date: {previewInspection.inspectionDate}</p>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="sticky bottom-0 bg-gray-100 p-4 flex gap-3 justify-end">
+              <button
+                onClick={() => handleDownloadPdf(previewInspection)}
+                disabled={generatingPdf === previewInspection.id}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {generatingPdf === previewInspection.id ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Download size={18} />
+                )}
+                Download PDF
+              </button>
+              <button
+                onClick={() => handleResendEmail(previewInspection)}
+                disabled={sendingEmail === previewInspection.id}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {sendingEmail === previewInspection.id ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Mail size={18} />
+                )}
+                Send Email
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
