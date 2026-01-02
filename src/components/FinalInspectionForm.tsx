@@ -11,7 +11,6 @@ import {
   QC_INSPECTORS,
   MERCHANTS,
   CUSTOMERS,
-  BUYER_DESIGNS,
   AQL_LEVELS,
   PHOTO_TYPES,
   COMPANIES,
@@ -112,6 +111,11 @@ export function FinalInspectionForm() {
   });
 
   const [defects, setDefects] = useState<Defect[]>([]);
+
+  // Custom "Other" input values for dropdowns
+  const [customQcInspector, setCustomQcInspector] = useState('');
+  const [customCustomer, setCustomCustomer] = useState('');
+  const [customMerchant, setCustomMerchant] = useState('');
 
   const [photos, setPhotos] = useState<Record<PhotoKey, File | null>>({
     approvedSamplePhoto: null,
@@ -242,8 +246,8 @@ export function FinalInspectionForm() {
 
         // Basic Info
         inspectionDate: formData.inspectionDate,
-        qcInspectorName: formData.qcInspectorName,
-        customerName: formData.customerName,
+        qcInspectorName: formData.qcInspectorName === 'Other' ? customQcInspector : formData.qcInspectorName,
+        customerName: formData.customerName === 'Other' ? customCustomer : formData.customerName,
         customerCode: formData.customerCode,
         customerPoNo: formData.customerPoNo,
         opsNo: formData.opsNo,
@@ -251,7 +255,7 @@ export function FinalInspectionForm() {
         emplDesignNo: formData.emplDesignNo,
         colorName: formData.colorName,
         productSizes: formData.productSizes,
-        merchant: formData.merchant,
+        merchant: formData.merchant === 'Other' ? customMerchant : formData.merchant,
 
         // Quantities
         totalOrderQty: Number(formData.totalOrderQty),
@@ -572,6 +576,9 @@ export function FinalInspectionForm() {
       });
       setOtherPhotos([]);
       setOtherPreviews([]);
+      setCustomQcInspector('');
+      setCustomCustomer('');
+      setCustomMerchant('');
 
     } catch (error) {
       console.error('Error submitting inspection:', error);
@@ -701,16 +708,30 @@ export function FinalInspectionForm() {
           <div>
             <label className={labelClass}>QC Inspector *</label>
             <select
-              required
+              required={formData.qcInspectorName !== 'Other'}
               value={formData.qcInspectorName}
-              onChange={(e) => setFormData({ ...formData, qcInspectorName: e.target.value })}
+              onChange={(e) => {
+                setFormData({ ...formData, qcInspectorName: e.target.value });
+                if (e.target.value !== 'Other') setCustomQcInspector('');
+              }}
               className={inputClass}
             >
               <option value="">Select Inspector</option>
               {QC_INSPECTORS.map(name => (
                 <option key={name} value={name}>{name}</option>
               ))}
+              <option value="Other">Other</option>
             </select>
+            {formData.qcInspectorName === 'Other' && (
+              <input
+                type="text"
+                required
+                value={customQcInspector}
+                onChange={(e) => setCustomQcInspector(e.target.value)}
+                className={`${inputClass} mt-2`}
+                placeholder="Enter inspector name"
+              />
+            )}
           </div>
         </div>
       </div>
@@ -722,9 +743,12 @@ export function FinalInspectionForm() {
           <div>
             <label className={labelClass}>Customer Name *</label>
             <select
-              required
+              required={formData.customerName !== 'Other'}
               value={formData.customerName}
-              onChange={(e) => setFormData({ ...formData, customerName: e.target.value })}
+              onChange={(e) => {
+                setFormData({ ...formData, customerName: e.target.value });
+                if (e.target.value !== 'Other') setCustomCustomer('');
+              }}
               className={inputClass}
             >
               <option value="">Select Customer</option>
@@ -732,6 +756,16 @@ export function FinalInspectionForm() {
                 <option key={name} value={name}>{name}</option>
               ))}
             </select>
+            {formData.customerName === 'Other' && (
+              <input
+                type="text"
+                required
+                value={customCustomer}
+                onChange={(e) => setCustomCustomer(e.target.value)}
+                className={`${inputClass} mt-2`}
+                placeholder="Enter customer name"
+              />
+            )}
           </div>
           <div>
             <label className={labelClass}>Customer Code *</label>
@@ -765,17 +799,14 @@ export function FinalInspectionForm() {
           </div>
           <div>
             <label className={labelClass}>Buyer Design Name *</label>
-            <select
+            <input
+              type="text"
               required
               value={formData.buyerDesignName}
               onChange={(e) => setFormData({ ...formData, buyerDesignName: e.target.value })}
               className={inputClass}
-            >
-              <option value="">Select Design</option>
-              {BUYER_DESIGNS.map(name => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </select>
+              placeholder="Enter design name"
+            />
           </div>
           <div>
             <label className={labelClass}>EMPL Design No. *</label>
@@ -811,16 +842,30 @@ export function FinalInspectionForm() {
           <div>
             <label className={labelClass}>Merchant *</label>
             <select
-              required
+              required={formData.merchant !== 'Other'}
               value={formData.merchant}
-              onChange={(e) => setFormData({ ...formData, merchant: e.target.value })}
+              onChange={(e) => {
+                setFormData({ ...formData, merchant: e.target.value });
+                if (e.target.value !== 'Other') setCustomMerchant('');
+              }}
               className={inputClass}
             >
               <option value="">Select Merchant</option>
               {MERCHANTS.map(name => (
                 <option key={name} value={name}>{name}</option>
               ))}
+              <option value="Other">Other</option>
             </select>
+            {formData.merchant === 'Other' && (
+              <input
+                type="text"
+                required
+                value={customMerchant}
+                onChange={(e) => setCustomMerchant(e.target.value)}
+                className={`${inputClass} mt-2`}
+                placeholder="Enter merchant name"
+              />
+            )}
           </div>
         </div>
       </div>
