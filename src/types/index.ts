@@ -1,4 +1,21 @@
+export type Company = 'EHI' | 'EMPL';
+export type OkNotOk = 'OK' | 'NOT OK';
+export type YesNo = 'Yes' | 'No';
+export type PackingType = 'Assorted' | 'Solid';
+
+export interface Defect {
+  defectCode: string;
+  majorCount: number;
+  minorCount: number;
+  description: string;
+}
+
 export interface FinalInspection {
+  // Company & Document
+  company: Company;
+  documentNo: string;  // EHI/IP/01 or EMPL/IP/01
+
+  // Basic Info
   inspectionDate: string;
   qcInspectorName: string;
   customerName: string;
@@ -10,12 +27,65 @@ export interface FinalInspection {
   colorName: string;
   productSizes: string;
   merchant: string;
+
+  // Quantities
   totalOrderQty: number;
   inspectedLotQty: number;
   aql: string;
   sampleSize: number;
   acceptedQty: number;
   rejectedQty: number;
+
+  // Product Quality Checks
+  approvedSampleAvailable: YesNo;
+  materialFibreContent: string;
+  motifDesignCheck: OkNotOk;
+  tuftDensity: string;
+  backing: OkNotOk;
+  backingNotes: string;
+  bindingAndEdges: OkNotOk;
+  handFeel: OkNotOk;
+  pileHeight: string;
+  embossingCarving: OkNotOk;
+  workmanship: OkNotOk;
+  productQualityWeight: OkNotOk;
+  productWeight: string;
+  sizeTolerance: string;
+  finishingPercent: string;
+  packedPercent: string;
+
+  // Labeling & Marking
+  labelPlacement: OkNotOk;
+  sideMarking: OkNotOk;
+  outerMarking: OkNotOk;
+  innerPack: OkNotOk;
+  careLabels: OkNotOk;
+  skuStickers: OkNotOk;
+  upcBarcodes: OkNotOk;
+
+  // Packaging
+  cartonPly: string;
+  cartonDropTest: OkNotOk;
+  packingType: PackingType;
+  grossWeight: string;
+  netWeight: string;
+  cartonBaleNumbering: OkNotOk;
+  pcsPerCartonBale: string;
+  pcsPerPolybag: string;
+  cartonMeasurementL: string;
+  cartonMeasurementW: string;
+  cartonMeasurementH: string;
+
+  // Original Checks (kept for compatibility)
+  cartonDimension: OkNotOk;
+  productLabel: OkNotOk;
+  cartonLabel: OkNotOk;
+  barcodeScan: OkNotOk;
+
+  // Defect Tracking
+  dpciSkuStyleNumber: string;
+  styleDescription: string;
+  defects: Defect[];
 
   // Photos
   approvedSamplePhoto: string;
@@ -31,17 +101,18 @@ export interface FinalInspection {
   metalCheckingPhoto: string;
   otherPhotos: string[];
 
-  // Checks
-  cartonDimension: 'OK' | 'NOT OK';
-  productLabel: 'OK' | 'NOT OK';
-  cartonLabel: 'OK' | 'NOT OK';
-  barcodeScan: 'OK' | 'NOT OK';
-
   qcInspectorRemarks: string;
   inspectionResult: 'PASS' | 'FAIL';
 
   createdAt: string;
 }
+
+export const COMPANIES: Company[] = ['EHI', 'EMPL'];
+
+export const COMPANY_NAMES: Record<Company, string> = {
+  'EHI': 'Eastern Home Industries',
+  'EMPL': 'Eastern Mills Pvt Ltd'
+};
 
 export const QC_INSPECTORS = [
   'Mahfooz Khan',
@@ -133,6 +204,38 @@ export const AQL_LEVELS = [
   '2.5',
   '4.0',
   '6.5'
+] as const;
+
+export const MATERIAL_TYPES = [
+  'Wool',
+  'Silk',
+  'Cotton',
+  'Jute',
+  'Viscose',
+  'Polyester',
+  'Nylon',
+  'Wool/Silk Blend',
+  'Wool/Viscose Blend',
+  'Cotton/Jute Blend',
+  'Other'
+] as const;
+
+export const DEFECT_CODES = [
+  { code: 'D01', description: 'Color Variation' },
+  { code: 'D02', description: 'Size Deviation' },
+  { code: 'D03', description: 'Weaving Defect' },
+  { code: 'D04', description: 'Missing Tuft' },
+  { code: 'D05', description: 'Stain/Spot' },
+  { code: 'D06', description: 'Backing Issue' },
+  { code: 'D07', description: 'Edge/Binding Defect' },
+  { code: 'D08', description: 'Pattern Mismatch' },
+  { code: 'D09', description: 'Pile Height Variation' },
+  { code: 'D10', description: 'Fringe Issue' },
+  { code: 'D11', description: 'Label Error' },
+  { code: 'D12', description: 'Packaging Damage' },
+  { code: 'D13', description: 'Metal Detected' },
+  { code: 'D14', description: 'Moisture Issue' },
+  { code: 'D15', description: 'Other' }
 ] as const;
 
 export const PHOTO_TYPES = [

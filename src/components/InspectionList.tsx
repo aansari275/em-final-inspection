@@ -1,10 +1,17 @@
 import { useState, useEffect } from 'react';
 import { collection, query, orderBy, getDocs, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { FinalInspection } from '../types';
+import { FinalInspection, COMPANY_NAMES } from '../types';
 import { generateFinalInspectionPDF } from '../lib/pdfGenerator';
 import { emailSettingsService } from '../lib/emailSettingsService';
 import { Trash2, Eye, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle, Download, Mail, FileText } from 'lucide-react';
+
+// Helper component for OK/NOT OK status badges
+const StatusBadge = ({ status }: { status: 'OK' | 'NOT OK' | string }) => (
+  <span className={`font-medium ${status === 'OK' ? 'text-green-600' : 'text-red-600'}`}>
+    {status}
+  </span>
+);
 
 export function InspectionList() {
   const [inspections, setInspections] = useState<(FinalInspection & { id: string })[]>([]);
@@ -196,7 +203,7 @@ export function InspectionList() {
             onClick={() => setExpandedId(expandedId === inspection.id ? null : inspection.id)}
           >
             <div className="flex-1">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 {inspection.inspectionResult === 'PASS' ? (
                   <CheckCircle2 className="w-5 h-5 text-green-600" />
                 ) : (
@@ -215,8 +222,15 @@ export function InspectionList() {
                 }`}>
                   {inspection.inspectionResult}
                 </span>
+                {inspection.company && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
+                    {inspection.company}
+                  </span>
+                )}
               </div>
               <p className="text-sm text-gray-500 mt-1">
+                {inspection.documentNo && <span className="text-emerald-600 font-medium">{inspection.documentNo}</span>}
+                {inspection.documentNo && ' | '}
                 Design: {inspection.buyerDesignName} | OPS: {inspection.opsNo}
               </p>
             </div>
@@ -287,93 +301,284 @@ export function InspectionList() {
           </div>
 
           {expandedId === inspection.id && (
-            <div className="border-t px-4 py-4 bg-gray-50">
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                <div>
-                  <span className="text-gray-500">Inspector:</span>
-                  <span className="ml-2 text-gray-900">{inspection.qcInspectorName}</span>
+            <div className="border-t px-4 py-4 bg-gray-50 space-y-4">
+              {/* Company & Document Info */}
+              {inspection.company && (
+                <div className="bg-white rounded-lg p-3 border">
+                  <h5 className="text-xs font-semibold text-emerald-700 uppercase mb-2">Company & Document</h5>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <span className="text-gray-500">Company:</span>
+                      <span className="ml-2 text-gray-900 font-medium">{COMPANY_NAMES[inspection.company] || inspection.company}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Document No:</span>
+                      <span className="ml-2 text-emerald-600 font-medium">{inspection.documentNo}</span>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-gray-500">Customer Code:</span>
-                  <span className="ml-2 text-gray-900">{inspection.customerCode}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Customer PO:</span>
-                  <span className="ml-2 text-gray-900">{inspection.customerPoNo}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">EMPL Design:</span>
-                  <span className="ml-2 text-gray-900">{inspection.emplDesignNo}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Color:</span>
-                  <span className="ml-2 text-gray-900">{inspection.colorName}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Sizes:</span>
-                  <span className="ml-2 text-gray-900">{inspection.productSizes}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Merchant:</span>
-                  <span className="ml-2 text-gray-900">{inspection.merchant}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Total Order:</span>
-                  <span className="ml-2 text-gray-900">{inspection.totalOrderQty}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Inspected Lot:</span>
-                  <span className="ml-2 text-gray-900">{inspection.inspectedLotQty}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">AQL:</span>
-                  <span className="ml-2 text-gray-900">{inspection.aql}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Sample Size:</span>
-                  <span className="ml-2 text-gray-900">{inspection.sampleSize}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Accepted:</span>
-                  <span className="ml-2 text-green-600 font-medium">{inspection.acceptedQty}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Rejected:</span>
-                  <span className="ml-2 text-red-600 font-medium">{inspection.rejectedQty}</span>
+              )}
+
+              {/* Basic Info */}
+              <div className="bg-white rounded-lg p-3 border">
+                <h5 className="text-xs font-semibold text-emerald-700 uppercase mb-2">Basic Information</h5>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                  <div>
+                    <span className="text-gray-500">Inspector:</span>
+                    <span className="ml-2 text-gray-900">{inspection.qcInspectorName}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Customer Code:</span>
+                    <span className="ml-2 text-gray-900">{inspection.customerCode}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Customer PO:</span>
+                    <span className="ml-2 text-gray-900">{inspection.customerPoNo}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">EMPL Design:</span>
+                    <span className="ml-2 text-gray-900">{inspection.emplDesignNo}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Color:</span>
+                    <span className="ml-2 text-gray-900">{inspection.colorName}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Sizes:</span>
+                    <span className="ml-2 text-gray-900">{inspection.productSizes}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Merchant:</span>
+                    <span className="ml-2 text-gray-900">{inspection.merchant}</span>
+                  </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t text-sm">
-                <div>
-                  <span className="text-gray-500">Carton Dimension:</span>
-                  <span className={`ml-2 font-medium ${inspection.cartonDimension === 'OK' ? 'text-green-600' : 'text-red-600'}`}>
-                    {inspection.cartonDimension}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Product Label:</span>
-                  <span className={`ml-2 font-medium ${inspection.productLabel === 'OK' ? 'text-green-600' : 'text-red-600'}`}>
-                    {inspection.productLabel}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Carton Label:</span>
-                  <span className={`ml-2 font-medium ${inspection.cartonLabel === 'OK' ? 'text-green-600' : 'text-red-600'}`}>
-                    {inspection.cartonLabel}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Barcode Scan:</span>
-                  <span className={`ml-2 font-medium ${inspection.barcodeScan === 'OK' ? 'text-green-600' : 'text-red-600'}`}>
-                    {inspection.barcodeScan}
-                  </span>
+              {/* Quantities */}
+              <div className="bg-white rounded-lg p-3 border">
+                <h5 className="text-xs font-semibold text-emerald-700 uppercase mb-2">Quantities</h5>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  <div>
+                    <span className="text-gray-500">Total Order:</span>
+                    <span className="ml-2 text-gray-900">{inspection.totalOrderQty}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Inspected Lot:</span>
+                    <span className="ml-2 text-gray-900">{inspection.inspectedLotQty}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">AQL:</span>
+                    <span className="ml-2 text-gray-900">{inspection.aql}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Sample Size:</span>
+                    <span className="ml-2 text-gray-900">{inspection.sampleSize}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Accepted:</span>
+                    <span className="ml-2 text-green-600 font-medium">{inspection.acceptedQty}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Rejected:</span>
+                    <span className="ml-2 text-red-600 font-medium">{inspection.rejectedQty}</span>
+                  </div>
                 </div>
               </div>
 
+              {/* Product Quality Checks */}
+              <div className="bg-white rounded-lg p-3 border">
+                <h5 className="text-xs font-semibold text-emerald-700 uppercase mb-2">Product Quality Checks</h5>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  <div>
+                    <span className="text-gray-500">Approved Sample:</span>
+                    <span className={`ml-2 font-medium ${inspection.approvedSampleAvailable === 'Yes' ? 'text-green-600' : 'text-red-600'}`}>
+                      {inspection.approvedSampleAvailable || 'N/A'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Material:</span>
+                    <span className="ml-2 text-gray-900">{inspection.materialFibreContent || 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Motif/Design:</span>
+                    <StatusBadge status={inspection.motifDesignCheck || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Backing:</span>
+                    <StatusBadge status={inspection.backing || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Binding & Edges:</span>
+                    <StatusBadge status={inspection.bindingAndEdges || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Hand Feel:</span>
+                    <StatusBadge status={inspection.handFeel || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Embossing/Carving:</span>
+                    <StatusBadge status={inspection.embossingCarving || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Workmanship:</span>
+                    <StatusBadge status={inspection.workmanship || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Weight Check:</span>
+                    <StatusBadge status={inspection.productQualityWeight || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Product Weight:</span>
+                    <span className="ml-2 text-gray-900">{inspection.productWeight || 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Size Tolerance:</span>
+                    <span className="ml-2 text-gray-900">{inspection.sizeTolerance || 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Pile Height:</span>
+                    <span className="ml-2 text-gray-900">{inspection.pileHeight || 'N/A'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Labeling & Marking */}
+              <div className="bg-white rounded-lg p-3 border">
+                <h5 className="text-xs font-semibold text-emerald-700 uppercase mb-2">Labeling & Marking</h5>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  <div>
+                    <span className="text-gray-500">Label Placement:</span>
+                    <StatusBadge status={inspection.labelPlacement || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Side Marking:</span>
+                    <StatusBadge status={inspection.sideMarking || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Outer Marking:</span>
+                    <StatusBadge status={inspection.outerMarking || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Inner Pack:</span>
+                    <StatusBadge status={inspection.innerPack || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Care Labels:</span>
+                    <StatusBadge status={inspection.careLabels || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">SKU Stickers:</span>
+                    <StatusBadge status={inspection.skuStickers || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">UPC Barcodes:</span>
+                    <StatusBadge status={inspection.upcBarcodes || 'N/A'} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Packaging */}
+              <div className="bg-white rounded-lg p-3 border">
+                <h5 className="text-xs font-semibold text-emerald-700 uppercase mb-2">Packaging</h5>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  <div>
+                    <span className="text-gray-500">Carton Dimension:</span>
+                    <StatusBadge status={inspection.cartonDimension || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Product Label:</span>
+                    <StatusBadge status={inspection.productLabel || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Carton Label:</span>
+                    <StatusBadge status={inspection.cartonLabel || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Barcode Scan:</span>
+                    <StatusBadge status={inspection.barcodeScan || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Carton Drop Test:</span>
+                    <StatusBadge status={inspection.cartonDropTest || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Carton Numbering:</span>
+                    <StatusBadge status={inspection.cartonBaleNumbering || 'N/A'} />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Packing Type:</span>
+                    <span className="ml-2 text-gray-900">{inspection.packingType || 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Carton Ply:</span>
+                    <span className="ml-2 text-gray-900">{inspection.cartonPly || 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Gross Weight:</span>
+                    <span className="ml-2 text-gray-900">{inspection.grossWeight || 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Net Weight:</span>
+                    <span className="ml-2 text-gray-900">{inspection.netWeight || 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Pcs/Carton:</span>
+                    <span className="ml-2 text-gray-900">{inspection.pcsPerCartonBale || 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Carton L×W×H:</span>
+                    <span className="ml-2 text-gray-900">
+                      {inspection.cartonMeasurementL && inspection.cartonMeasurementW && inspection.cartonMeasurementH
+                        ? `${inspection.cartonMeasurementL} × ${inspection.cartonMeasurementW} × ${inspection.cartonMeasurementH}`
+                        : 'N/A'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Defects */}
+              {inspection.defects && inspection.defects.length > 0 && (
+                <div className="bg-white rounded-lg p-3 border">
+                  <h5 className="text-xs font-semibold text-red-700 uppercase mb-2">Defects Found</h5>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-100 text-left">
+                          <th className="px-2 py-1">Code</th>
+                          <th className="px-2 py-1">Description</th>
+                          <th className="px-2 py-1 text-center">Major</th>
+                          <th className="px-2 py-1 text-center">Minor</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {inspection.defects.map((defect, idx) => (
+                          <tr key={idx} className="border-t">
+                            <td className="px-2 py-1 font-medium">{defect.defectCode}</td>
+                            <td className="px-2 py-1">{defect.description}</td>
+                            <td className="px-2 py-1 text-center text-red-600 font-medium">{defect.majorCount}</td>
+                            <td className="px-2 py-1 text-center text-orange-600 font-medium">{defect.minorCount}</td>
+                          </tr>
+                        ))}
+                        <tr className="border-t bg-gray-50 font-medium">
+                          <td className="px-2 py-1" colSpan={2}>Total</td>
+                          <td className="px-2 py-1 text-center text-red-600">
+                            {inspection.defects.reduce((sum, d) => sum + d.majorCount, 0)}
+                          </td>
+                          <td className="px-2 py-1 text-center text-orange-600">
+                            {inspection.defects.reduce((sum, d) => sum + d.minorCount, 0)}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Remarks */}
               {inspection.qcInspectorRemarks && (
-                <div className="mt-4 pt-4 border-t">
-                  <span className="text-sm text-gray-500">Remarks:</span>
-                  <p className="text-sm text-gray-900 mt-1">{inspection.qcInspectorRemarks}</p>
+                <div className="bg-white rounded-lg p-3 border">
+                  <h5 className="text-xs font-semibold text-emerald-700 uppercase mb-2">QC Remarks</h5>
+                  <p className="text-sm text-gray-900">{inspection.qcInspectorRemarks}</p>
                 </div>
               )}
 
@@ -474,6 +679,14 @@ export function InspectionList() {
                 </span>
               </div>
 
+              {/* Company & Document */}
+              {previewInspection.company && (
+                <div className="bg-blue-50 rounded-lg p-4 text-center">
+                  <p className="font-semibold text-blue-800">{COMPANY_NAMES[previewInspection.company]}</p>
+                  <p className="text-sm text-blue-600">Document No: {previewInspection.documentNo}</p>
+                </div>
+              )}
+
               {/* Order Info */}
               <div className="bg-gray-50 rounded-lg p-4">
                 <h4 className="font-semibold text-emerald-700 mb-3">Order Information</h4>
@@ -508,36 +721,155 @@ export function InspectionList() {
                 </div>
               </div>
 
-              {/* Quality Checks */}
+              {/* Product Quality Checks */}
               <div className="bg-gray-50 rounded-lg p-4">
-                <h4 className="font-semibold text-emerald-700 mb-3">Quality Checks</h4>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                <h4 className="font-semibold text-emerald-700 mb-3">Product Quality Checks</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Approved Sample:</span>
+                    <span className={previewInspection.approvedSampleAvailable === 'Yes' ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                      {previewInspection.approvedSampleAvailable || 'N/A'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Material:</span>
+                    <span className="font-medium">{previewInspection.materialFibreContent || 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Motif/Design:</span>
+                    <StatusBadge status={previewInspection.motifDesignCheck || 'N/A'} />
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Backing:</span>
+                    <StatusBadge status={previewInspection.backing || 'N/A'} />
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Binding & Edges:</span>
+                    <StatusBadge status={previewInspection.bindingAndEdges || 'N/A'} />
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Hand Feel:</span>
+                    <StatusBadge status={previewInspection.handFeel || 'N/A'} />
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Embossing/Carving:</span>
+                    <StatusBadge status={previewInspection.embossingCarving || 'N/A'} />
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Workmanship:</span>
+                    <StatusBadge status={previewInspection.workmanship || 'N/A'} />
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Weight Check:</span>
+                    <StatusBadge status={previewInspection.productQualityWeight || 'N/A'} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Labeling & Marking */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h4 className="font-semibold text-emerald-700 mb-3">Labeling & Marking</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Label Placement:</span>
+                    <StatusBadge status={previewInspection.labelPlacement || 'N/A'} />
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Side Marking:</span>
+                    <StatusBadge status={previewInspection.sideMarking || 'N/A'} />
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Outer Marking:</span>
+                    <StatusBadge status={previewInspection.outerMarking || 'N/A'} />
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Inner Pack:</span>
+                    <StatusBadge status={previewInspection.innerPack || 'N/A'} />
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Care Labels:</span>
+                    <StatusBadge status={previewInspection.careLabels || 'N/A'} />
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">SKU Stickers:</span>
+                    <StatusBadge status={previewInspection.skuStickers || 'N/A'} />
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">UPC Barcodes:</span>
+                    <StatusBadge status={previewInspection.upcBarcodes || 'N/A'} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Packaging */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h4 className="font-semibold text-emerald-700 mb-3">Packaging</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-500">Carton Dimension:</span>
-                    <span className={previewInspection.cartonDimension === 'OK' ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
-                      {previewInspection.cartonDimension}
-                    </span>
+                    <StatusBadge status={previewInspection.cartonDimension || 'N/A'} />
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">Product Label:</span>
-                    <span className={previewInspection.productLabel === 'OK' ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
-                      {previewInspection.productLabel}
-                    </span>
+                    <StatusBadge status={previewInspection.productLabel || 'N/A'} />
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">Carton Label:</span>
-                    <span className={previewInspection.cartonLabel === 'OK' ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
-                      {previewInspection.cartonLabel}
-                    </span>
+                    <StatusBadge status={previewInspection.cartonLabel || 'N/A'} />
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">Barcode:</span>
-                    <span className={previewInspection.barcodeScan === 'OK' ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
-                      {previewInspection.barcodeScan}
+                    <StatusBadge status={previewInspection.barcodeScan || 'N/A'} />
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Carton Drop Test:</span>
+                    <StatusBadge status={previewInspection.cartonDropTest || 'N/A'} />
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Carton Numbering:</span>
+                    <StatusBadge status={previewInspection.cartonBaleNumbering || 'N/A'} />
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Packing Type:</span>
+                    <span className="font-medium">{previewInspection.packingType || 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Carton L×W×H:</span>
+                    <span className="font-medium">
+                      {previewInspection.cartonMeasurementL && previewInspection.cartonMeasurementW && previewInspection.cartonMeasurementH
+                        ? `${previewInspection.cartonMeasurementL}×${previewInspection.cartonMeasurementW}×${previewInspection.cartonMeasurementH}`
+                        : 'N/A'}
                     </span>
                   </div>
                 </div>
               </div>
+
+              {/* Defects */}
+              {previewInspection.defects && previewInspection.defects.length > 0 && (
+                <div className="bg-red-50 rounded-lg p-4">
+                  <h4 className="font-semibold text-red-700 mb-3">Defects Found</h4>
+                  <div className="space-y-2">
+                    {previewInspection.defects.map((defect, idx) => (
+                      <div key={idx} className="flex justify-between text-sm bg-white p-2 rounded">
+                        <span className="font-medium">{defect.defectCode}: {defect.description}</span>
+                        <span>
+                          <span className="text-red-600">Major: {defect.majorCount}</span>
+                          <span className="mx-2">|</span>
+                          <span className="text-orange-600">Minor: {defect.minorCount}</span>
+                        </span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between text-sm font-bold pt-2 border-t border-red-200">
+                      <span>Total</span>
+                      <span>
+                        <span className="text-red-600">Major: {previewInspection.defects.reduce((sum, d) => sum + d.majorCount, 0)}</span>
+                        <span className="mx-2">|</span>
+                        <span className="text-orange-600">Minor: {previewInspection.defects.reduce((sum, d) => sum + d.minorCount, 0)}</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Remarks */}
               {previewInspection.qcInspectorRemarks && (
@@ -550,6 +882,9 @@ export function InspectionList() {
               {/* Footer */}
               <div className="border-t pt-4 text-sm text-gray-500 text-center">
                 <p>Inspected by: {previewInspection.qcInspectorName} | Date: {previewInspection.inspectionDate}</p>
+                {previewInspection.documentNo && (
+                  <p className="text-emerald-600 font-medium">{previewInspection.documentNo}</p>
+                )}
               </div>
             </div>
 
