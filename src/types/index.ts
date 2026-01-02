@@ -2,6 +2,13 @@ export type Company = 'EHI' | 'EMPL';
 export type OkNotOk = 'OK' | 'NOT OK';
 export type YesNo = 'Yes' | 'No';
 export type PackingType = 'Assorted' | 'Solid';
+export type SizeUnit = 'cm' | 'feet';
+
+// Customer with code (synced from TED forms via Firestore)
+export interface Customer {
+  name: string;
+  code: string;
+}
 
 export interface Defect {
   defectCode: string;
@@ -9,6 +16,81 @@ export interface Defect {
   minorCount: number;
   description: string;
 }
+
+// NOT OK photo for quality check fields
+export interface NotOkPhoto {
+  field: string;
+  photo: string;  // URL after upload
+}
+
+// Product size with unit
+export interface ProductSize {
+  value: string;
+  unit: SizeUnit;
+}
+
+// Custom options storage keys
+export const CUSTOM_OPTIONS_KEYS = {
+  qcInspectors: 'em_custom_qc_inspectors',
+  customers: 'em_custom_customers',
+  merchants: 'em_custom_merchants',
+  productSizes: 'em_custom_product_sizes',
+  buyerDesigns: 'em_custom_buyer_designs',
+  customSizesCm: 'em_custom_sizes_cm',
+  customSizesFeet: 'em_custom_sizes_feet',
+} as const;
+
+// Standard product sizes in cm
+export const STANDARD_SIZES_CM = [
+  '60x90',
+  '90x150',
+  '120x180',
+  '140x200',
+  '160x230',
+  '170x240',
+  '200x300',
+  '250x300',
+  '250x350',
+  '300x400',
+] as const;
+
+// Standard product sizes in feet
+export const STANDARD_SIZES_FEET = [
+  '2x3',
+  '3x5',
+  '4x6',
+  '5x7',
+  '5x8',
+  '6x9',
+  '8x10',
+  '9x12',
+  '10x14',
+  '12x15',
+] as const;
+
+// All OK/NOT OK check fields for photo support
+export const OK_NOT_OK_FIELDS = [
+  { key: 'motifDesignCheck', label: 'Motif/Design Check' },
+  { key: 'backing', label: 'Backing' },
+  { key: 'bindingAndEdges', label: 'Binding & Edges' },
+  { key: 'handFeel', label: 'Hand Feel' },
+  { key: 'embossingCarving', label: 'Embossing/Carving' },
+  { key: 'workmanship', label: 'Workmanship' },
+  { key: 'productQualityWeight', label: 'Product Quality Weight' },
+  { key: 'labelPlacement', label: 'Label Placement' },
+  { key: 'sideMarking', label: 'Side Marking' },
+  { key: 'outerMarking', label: 'Outer Marking' },
+  { key: 'innerPack', label: 'Inner Pack' },
+  { key: 'careLabels', label: 'Care Labels' },
+  { key: 'skuStickers', label: 'SKU Stickers' },
+  { key: 'upcBarcodes', label: 'UPC Barcodes' },
+  { key: 'cartonDropTest', label: 'Carton Drop Test' },
+  { key: 'cartonBaleNumbering', label: 'Carton/Bale Numbering' },
+  { key: 'cartonDimension', label: 'Carton Dimension' },
+  { key: 'productLabel', label: 'Product Label' },
+  { key: 'cartonLabel', label: 'Carton Label' },
+  { key: 'barcodeScan', label: 'Barcode Scan' },
+] as const;
 
 export interface FinalInspection {
   // Company & Document
@@ -101,6 +183,12 @@ export interface FinalInspection {
   metalCheckingPhoto: string;
   otherPhotos: string[];
 
+  // NOT OK photos (photos for fields marked as NOT OK)
+  notOkPhotos: NotOkPhoto[];
+
+  // Size unit used
+  sizeUnit: SizeUnit;
+
   qcInspectorRemarks: string;
   inspectionResult: 'PASS' | 'FAIL';
 
@@ -129,73 +217,9 @@ export const MERCHANTS = [
   'Zahid'
 ] as const;
 
-export const CUSTOMERS = [
-  'ACME Corporation',
-  'Amazon',
-  'Anthropic',
-  'Ashley Furniture',
-  'Bed Bath & Beyond',
-  'Bloomingdale\'s',
-  'Crate & Barrel',
-  'CB2',
-  'Costco',
-  'Ethan Allen',
-  'Home Depot',
-  'IKEA',
-  'JCPenney',
-  'Kohl\'s',
-  'Lowe\'s',
-  'Macy\'s',
-  'Nordstrom',
-  'Overstock',
-  'Pier 1 Imports',
-  'Pottery Barn',
-  'Restoration Hardware',
-  'Room & Board',
-  'Target',
-  'The Container Store',
-  'Tuesday Morning',
-  'Wayfair',
-  'West Elm',
-  'Williams-Sonoma',
-  'World Market',
-  'Z Gallerie',
-  'Arhaus',
-  'Ballard Designs',
-  'Frontgate',
-  'Grandin Road',
-  'Horchow',
-  'Joss & Main',
-  'Serena & Lily',
-  'One Kings Lane',
-  'Perigold',
-  'Rugs USA',
-  'Safavieh',
-  'Surya',
-  'Nourison',
-  'Other'
-] as const;
+// CUSTOMERS removed - now loaded from Firestore (synced with TED forms)
 
-export const BUYER_DESIGNS = [
-  'Aegean', 'Agra', 'Amara', 'Amber', 'Andorra', 'Ankara', 'Antique', 'Arabesque', 'Aria', 'Artisan',
-  'Ashton', 'Atlas', 'Aurora', 'Avalon', 'Avery', 'Azure', 'Babylon', 'Barcelona', 'Barrington', 'Bellini',
-  'Bengal', 'Berlin', 'Bermuda', 'Bethany', 'Beverly', 'Bianca', 'Birch', 'Blossom', 'Bohemian', 'Bombay',
-  'Bordeaux', 'Brighton', 'Bristol', 'Brooklyn', 'Brussels', 'Cairo', 'Calabria', 'Cambridge', 'Capri', 'Carmen',
-  'Carolina', 'Casablanca', 'Cascade', 'Catalina', 'Celestia', 'Celtic', 'Chantilly', 'Charleston', 'Chelsea', 'Chester',
-  'Chevron', 'Claudia', 'Coastal', 'Colonial', 'Como', 'Copenhagen', 'Coral', 'Cordoba', 'Cornwall', 'Corsica',
-  'Cosmopolitan', 'Coventry', 'Cyprus', 'Dakota', 'Damascus', 'Damask', 'Delhi', 'Devon', 'Diamond', 'Dynasty',
-  'Eclipse', 'Eden', 'Edinburgh', 'Egypt', 'Elegance', 'Elite', 'Emerald', 'Empire', 'Enchanted', 'English',
-  'Essence', 'Eternity', 'Europa', 'Everest', 'Exotic', 'Fantasy', 'Fez', 'Fiesta', 'Fiji', 'Flora',
-  'Florence', 'Fontana', 'Fortune', 'Fusion', 'Galaxy', 'Geneva', 'Genoa', 'Georgia', 'Gibraltar', 'Glasgow',
-  'Global', 'Gloria', 'Granada', 'Grecian', 'Greenwich', 'Greta', 'Hampton', 'Harmony', 'Havana', 'Heritage',
-  'Himalaya', 'Hudson', 'Imperial', 'India', 'Infinity', 'Isfahan', 'Istanbul', 'Ivory', 'Jade', 'Jaipur',
-  'Jamaica', 'Java', 'Jewel', 'Jordan', 'Kashmir', 'Kenya', 'Kilim', 'Kingston', 'Kyoto', 'Laguna',
-  'Lancaster', 'Legend', 'Lexington', 'Liberty', 'Lima', 'London', 'Lotus', 'Lucia', 'Luna', 'Luxor',
-  'Lyon', 'Madrid', 'Mahal', 'Malibu', 'Malta', 'Manchester', 'Manhattan', 'Manila', 'Marakesh', 'Marina',
-  'Marquee', 'Marseille', 'Maya', 'Mediterranean', 'Melbourne', 'Memphis', 'Meridian', 'Milan', 'Monaco', 'Montana',
-  'Monterey', 'Morocco', 'Mumbai', 'Mystic', 'Naples', 'Natural', 'Nepal', 'Newport', 'Nirvana', 'Nordic',
-  'Normandy', 'Other'
-] as const;
+// BUYER_DESIGNS removed - now stored in localStorage with ability to add new ones
 
 export const AQL_LEVELS = [
   '0.65',

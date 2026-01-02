@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf';
-import { FinalInspection, COMPANY_NAMES } from '../types';
+import { FinalInspection, COMPANY_NAMES, OK_NOT_OK_FIELDS } from '../types';
 
 // Convert image URL to base64 data URL to avoid CORS issues
 async function urlToBase64(url: string): Promise<string | null> {
@@ -24,13 +24,13 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
   const pageHeight = doc.internal.pageSize.getHeight();
   let y = 15;
 
-  // Colors
-  const primaryColor: [number, number, number] = [16, 185, 129]; // Emerald
+  // Colors - Professional, muted corporate palette
+  const primaryColor: [number, number, number] = [0, 82, 94]; // Deep teal - professional & corporate
   const darkGray: [number, number, number] = [55, 65, 81];
   const lightGray: [number, number, number] = [156, 163, 175];
-  const successGreen: [number, number, number] = [34, 197, 94];
-  const errorRed: [number, number, number] = [239, 68, 68];
-  const warningYellow: [number, number, number] = [234, 179, 8];
+  const successGreen: [number, number, number] = [39, 119, 63]; // Deep forest green
+  const errorRed: [number, number, number] = [185, 28, 28]; // Deep crimson
+  const warningYellow: [number, number, number] = [180, 130, 30]; // Dark amber
 
   // Header bar
   doc.setFillColor(...primaryColor);
@@ -168,11 +168,10 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
   // Order Information Section
   addSection('Order Information');
   addRow([['Inspection Date', inspection.inspectionDate], ['Inspector', inspection.qcInspectorName]]);
-  addRow([['Customer', inspection.customerName], ['Customer Code', inspection.customerCode]]);
-  addRow([['Customer PO', inspection.customerPoNo], ['OPS No.', inspection.opsNo]]);
+  addRow([['Customer Code', inspection.customerCode], ['Customer PO', inspection.customerPoNo]]);
+  addRow([['OPS No.', inspection.opsNo], ['Merchant', inspection.merchant]]);
   addRow([['Buyer Design', inspection.buyerDesignName], ['EMPL Design', inspection.emplDesignNo]]);
   addRow([['Color', inspection.colorName], ['Product Sizes', inspection.productSizes]]);
-  addRow([['Merchant', inspection.merchant]]);
 
   y += 4;
 
@@ -479,6 +478,16 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
 
   for (let i = 0; i < inspection.otherPhotos.length; i++) {
     await addImagePage(inspection.otherPhotos[i], `Other Photo ${i + 1}`);
+  }
+
+  // Add NOT OK photos
+  if (inspection.notOkPhotos && inspection.notOkPhotos.length > 0) {
+    for (const notOkPhoto of inspection.notOkPhotos) {
+      // Find the field label from OK_NOT_OK_FIELDS
+      const fieldInfo = OK_NOT_OK_FIELDS.find(f => f.key === notOkPhoto.field);
+      const fieldLabel = fieldInfo ? fieldInfo.label : notOkPhoto.field;
+      await addImagePage(notOkPhoto.photo, `NOT OK - ${fieldLabel}`);
+    }
   }
 
   return doc.output('datauristring').split(',')[1];

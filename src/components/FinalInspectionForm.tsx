@@ -1,24 +1,322 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { collection, addDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../lib/firebase';
+import { db, storage, getCustomers, addCustomer } from '../lib/firebase';
 import { emailSettingsService } from '../lib/emailSettingsService';
 import { generateFinalInspectionPDF } from '../lib/pdfGenerator';
 import {
   FinalInspection,
-  Defect,
-  Company,
   QC_INSPECTORS,
   MERCHANTS,
-  CUSTOMERS,
   AQL_LEVELS,
   PHOTO_TYPES,
-  COMPANIES,
-  COMPANY_NAMES,
-  MATERIAL_TYPES,
-  DEFECT_CODES
+  OkNotOk,
+  Defect,
+  NotOkPhoto,
+  SizeUnit,
+  CUSTOM_OPTIONS_KEYS,
+  OK_NOT_OK_FIELDS,
+  Customer,
+  STANDARD_SIZES_CM,
+  STANDARD_SIZES_FEET
 } from '../types';
-import { Loader2, Upload, X, Camera, CheckCircle2, XCircle, Plus, Trash2 } from 'lucide-react';
+import { Loader2, Upload, X, Camera, CheckCircle2, XCircle, Plus } from 'lucide-react';
+
+// Helper to get custom options from localStorage
+const getCustomOptions = (key: string): string[] => {
+  try {
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
+// Helper to save custom options to localStorage
+const saveCustomOptions = (key: string, options: string[]) => {
+  localStorage.setItem(key, JSON.stringify(options));
+};
+
+// Dropdown with Add button component
+interface DropdownWithAddProps {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: readonly string[] | string[];
+  customOptions: string[];
+  onAddCustom: (value: string) => void;
+  required?: boolean;
+  placeholder?: string;
+}
+
+function DropdownWithAdd({
+  label,
+  value,
+  onChange,
+  options,
+  customOptions,
+  onAddCustom,
+  required = false,
+  placeholder = 'Select...'
+}: DropdownWithAddProps) {
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newValue, setNewValue] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const allOptions = [...options, ...customOptions];
+
+  const handleAdd = () => {
+    if (newValue.trim() && !allOptions.includes(newValue.trim())) {
+      onAddCustom(newValue.trim());
+      onChange(newValue.trim());
+      setNewValue('');
+      setShowAddModal(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showAddModal && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [showAddModal]);
+
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">{label} {required && '*'}</label>
+      <div className="flex border border-gray-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 bg-white">
+        <select
+          required={required}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="flex-1 px-3 py-2 border-0 bg-transparent focus:ring-0 focus:outline-none"
+        >
+          <option value="">{placeholder}</option>
+          {allOptions.map(opt => (
+            <option key={opt} value={opt}>{opt}</option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => setShowAddModal(true)}
+          className="px-3 py-2 border-l border-gray-300 text-emerald-600 hover:bg-emerald-50 transition-colors"
+          title="Add new option"
+        >
+          <Plus size={18} />
+        </button>
+      </div>
+
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-6 w-full max-w-sm shadow-xl">
+            <h3 className="text-lg font-semibold mb-4">Add New {label}</h3>
+            <input
+              ref={inputRef}
+              type="text"
+              value={newValue}
+              onChange={(e) => setNewValue(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+              placeholder={`Enter new ${label.toLowerCase()}`}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 mb-4"
+            />
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => { setShowAddModal(false); setNewValue(''); }}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleAdd}
+                disabled={!newValue.trim()}
+                className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Customer Dropdown with Firestore sync - shows "Name (Code)" format
+interface CustomerDropdownProps {
+  customerName: string;
+  customers: Customer[];
+  onCustomerChange: (name: string, code: string) => void;
+  onAddCustomer: (customer: Customer) => void;
+  required?: boolean;
+  loading?: boolean;
+}
+
+function CustomerDropdown({
+  customerName,
+  customers,
+  onCustomerChange,
+  onAddCustomer,
+  required = false,
+  loading = false
+}: CustomerDropdownProps) {
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newCode, setNewCode] = useState('');
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  const handleSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedValue = e.target.value;
+    if (!selectedValue) {
+      onCustomerChange('', '');
+      return;
+    }
+    // Find the customer by name
+    const customer = customers.find(c => c.name === selectedValue);
+    if (customer) {
+      onCustomerChange(customer.name, customer.code);
+    }
+  };
+
+  const handleAdd = async () => {
+    if (newName.trim() && newCode.trim()) {
+      const customer: Customer = {
+        name: newName.trim().toUpperCase(),
+        code: newCode.trim().toUpperCase()
+      };
+      onAddCustomer(customer);
+      onCustomerChange(customer.name, customer.code);
+      setNewName('');
+      setNewCode('');
+      setShowAddModal(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showAddModal && nameInputRef.current) {
+      nameInputRef.current.focus();
+    }
+  }, [showAddModal]);
+
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">Customer Name {required && '*'}</label>
+      <div className="flex border border-gray-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 bg-white">
+        <select
+          required={required}
+          value={customerName}
+          onChange={handleSelect}
+          disabled={loading}
+          className="flex-1 px-3 py-2 border-0 bg-transparent focus:ring-0 focus:outline-none disabled:bg-gray-100 disabled:cursor-wait"
+        >
+          <option value="">{loading ? 'Loading customers...' : 'Select Customer'}</option>
+          {customers.map(c => (
+            <option key={c.code} value={c.name}>{c.name} ({c.code})</option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => setShowAddModal(true)}
+          className="px-3 py-2 border-l border-gray-300 text-emerald-600 hover:bg-emerald-50 transition-colors"
+          title="Add new customer"
+        >
+          <Plus size={18} />
+        </button>
+      </div>
+
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-6 w-full max-w-sm shadow-xl">
+            <h3 className="text-lg font-semibold mb-4">Add New Customer</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Customer Name *</label>
+                <input
+                  ref={nameInputRef}
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="e.g., NORDIC KNOTS"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 uppercase"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Customer Code *</label>
+                <input
+                  type="text"
+                  value={newCode}
+                  onChange={(e) => setNewCode(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+                  placeholder="e.g., N-02"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 uppercase"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                type="button"
+                onClick={() => { setShowAddModal(false); setNewName(''); setNewCode(''); }}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleAdd}
+                disabled={!newName.trim() || !newCode.trim()}
+                className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// NOT OK photo component
+interface NotOkPhotoProps {
+  fieldKey: string;
+  fieldLabel: string;
+  isNotOk: boolean;
+  photo: File | null;
+  preview: string;
+  onPhotoChange: (file: File | null) => void;
+}
+
+function NotOkPhotoUpload({ fieldLabel, isNotOk, preview, onPhotoChange }: NotOkPhotoProps) {
+  if (!isNotOk) return null;
+
+  return (
+    <div className="mt-2">
+      {preview ? (
+        <div className="relative inline-block">
+          <img src={preview} alt={`${fieldLabel} NOT OK`} className="w-20 h-20 object-cover rounded-lg border-2 border-red-300" />
+          <button
+            type="button"
+            onClick={() => onPhotoChange(null)}
+            className="absolute -top-1 -right-1 p-0.5 bg-red-500 text-white rounded-full"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      ) : (
+        <label className="inline-flex items-center gap-2 px-3 py-1.5 text-sm border border-red-300 text-red-600 rounded-lg cursor-pointer hover:bg-red-50">
+          <Camera size={16} />
+          <span>Add Photo</span>
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => onPhotoChange(e.target.files?.[0] || null)}
+          />
+        </label>
+      )}
+    </div>
+  );
+}
 
 type PhotoKey = keyof Pick<FinalInspection,
   'approvedSamplePhoto' | 'idPhoto' | 'redSealFrontPhoto' | 'redSealSidePhoto' |
@@ -26,96 +324,271 @@ type PhotoKey = keyof Pick<FinalInspection,
   'inspectedSamplesPhoto' | 'metalCheckingPhoto'
 >;
 
+// Form state type with proper union types
+interface FormDataState {
+  company: 'EHI' | 'EMPL';
+  documentNo: string;
+  inspectionDate: string;
+  qcInspectorName: string;
+  customerName: string;
+  customerCode: string;
+  customerPoNo: string;
+  opsNo: string;
+  buyerDesignName: string;
+  emplDesignNo: string;
+  colorName: string;
+  productSizes: string;
+  merchant: string;
+  totalOrderQty: string;
+  inspectedLotQty: string;
+  aql: string;
+  sampleSize: string;
+  acceptedQty: string;
+  rejectedQty: string;
+  approvedSampleAvailable: 'Yes' | 'No';
+  materialFibreContent: string;
+  motifDesignCheck: OkNotOk;
+  tuftDensity: string;
+  backing: OkNotOk;
+  backingNotes: string;
+  bindingAndEdges: OkNotOk;
+  handFeel: OkNotOk;
+  pileHeight: string;
+  embossingCarving: OkNotOk;
+  workmanship: OkNotOk;
+  productQualityWeight: OkNotOk;
+  productWeight: string;
+  sizeTolerance: string;
+  finishingPercent: string;
+  packedPercent: string;
+  labelPlacement: OkNotOk;
+  sideMarking: OkNotOk;
+  outerMarking: OkNotOk;
+  innerPack: OkNotOk;
+  careLabels: OkNotOk;
+  skuStickers: OkNotOk;
+  upcBarcodes: OkNotOk;
+  cartonPly: string;
+  cartonDropTest: OkNotOk;
+  packingType: 'Assorted' | 'Solid';
+  grossWeight: string;
+  netWeight: string;
+  cartonBaleNumbering: OkNotOk;
+  pcsPerCartonBale: string;
+  pcsPerPolybag: string;
+  cartonMeasurementL: string;
+  cartonMeasurementW: string;
+  cartonMeasurementH: string;
+  cartonDimension: OkNotOk;
+  productLabel: OkNotOk;
+  cartonLabel: OkNotOk;
+  barcodeScan: OkNotOk;
+  dpciSkuStyleNumber: string;
+  styleDescription: string;
+  qcInspectorRemarks: string;
+  inspectionResult: 'PASS' | 'FAIL';
+}
+
+const initialFormData: FormDataState = {
+  company: 'EHI',
+  documentNo: 'EHI/IP/01',
+  inspectionDate: new Date().toISOString().split('T')[0],
+  qcInspectorName: '',
+  customerName: '',
+  customerCode: '',
+  customerPoNo: '',
+  opsNo: '',
+  buyerDesignName: '',
+  emplDesignNo: '',
+  colorName: '',
+  productSizes: '',
+  merchant: '',
+  totalOrderQty: '',
+  inspectedLotQty: '',
+  aql: '2.5',
+  sampleSize: '',
+  acceptedQty: '',
+  rejectedQty: '',
+  approvedSampleAvailable: 'Yes',
+  materialFibreContent: '',
+  motifDesignCheck: 'OK',
+  tuftDensity: '',
+  backing: 'OK',
+  backingNotes: '',
+  bindingAndEdges: 'OK',
+  handFeel: 'OK',
+  pileHeight: '',
+  embossingCarving: 'OK',
+  workmanship: 'OK',
+  productQualityWeight: 'OK',
+  productWeight: '',
+  sizeTolerance: '',
+  finishingPercent: '',
+  packedPercent: '',
+  labelPlacement: 'OK',
+  sideMarking: 'OK',
+  outerMarking: 'OK',
+  innerPack: 'OK',
+  careLabels: 'OK',
+  skuStickers: 'OK',
+  upcBarcodes: 'OK',
+  cartonPly: '',
+  cartonDropTest: 'OK',
+  packingType: 'Solid',
+  grossWeight: '',
+  netWeight: '',
+  cartonBaleNumbering: 'OK',
+  pcsPerCartonBale: '',
+  pcsPerPolybag: '',
+  cartonMeasurementL: '',
+  cartonMeasurementW: '',
+  cartonMeasurementH: '',
+  cartonDimension: 'OK',
+  productLabel: 'OK',
+  cartonLabel: 'OK',
+  barcodeScan: 'OK',
+  dpciSkuStyleNumber: '',
+  styleDescription: '',
+  qcInspectorRemarks: '',
+  inspectionResult: 'PASS'
+};
+
 export function FinalInspectionForm() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
 
-  const [formData, setFormData] = useState({
-    // Company & Document
-    company: 'EHI' as Company,
-    documentNo: 'EHI/IP/01',
-
-    // Basic Info
-    inspectionDate: new Date().toISOString().split('T')[0],
-    qcInspectorName: '',
-    customerName: '',
-    customerCode: '',
-    customerPoNo: '',
-    opsNo: '',
-    buyerDesignName: '',
-    emplDesignNo: '',
-    colorName: '',
-    productSizes: '',
-    merchant: '',
-
-    // Quantities
-    totalOrderQty: '',
-    inspectedLotQty: '',
-    aql: '2.5',
-    sampleSize: '',
-    acceptedQty: '',
-    rejectedQty: '',
-
-    // Product Quality Checks
-    approvedSampleAvailable: 'Yes',
-    materialFibreContent: '',
-    motifDesignCheck: 'OK',
-    tuftDensity: '',
-    backing: 'OK',
-    backingNotes: '',
-    bindingAndEdges: 'OK',
-    handFeel: 'OK',
-    pileHeight: '',
-    embossingCarving: 'OK',
-    workmanship: 'OK',
-    productQualityWeight: 'OK',
-    productWeight: '',
-    sizeTolerance: '',
-    finishingPercent: '',
-    packedPercent: '',
-
-    // Labeling & Marking
-    labelPlacement: 'OK',
-    sideMarking: 'OK',
-    outerMarking: 'OK',
-    innerPack: 'OK',
-    careLabels: 'OK',
-    skuStickers: 'OK',
-    upcBarcodes: 'OK',
-
-    // Packaging
-    cartonPly: '',
-    cartonDropTest: 'OK',
-    packingType: 'Solid',
-    grossWeight: '',
-    netWeight: '',
-    cartonBaleNumbering: 'OK',
-    pcsPerCartonBale: '',
-    pcsPerPolybag: '',
-    cartonMeasurementL: '',
-    cartonMeasurementW: '',
-    cartonMeasurementH: '',
-
-    // Original Checks (kept for compatibility)
-    cartonDimension: 'OK',
-    productLabel: 'OK',
-    cartonLabel: 'OK',
-    barcodeScan: 'OK',
-
-    // Defect Tracking
-    dpciSkuStyleNumber: '',
-    styleDescription: '',
-
-    qcInspectorRemarks: '',
-    inspectionResult: 'PASS'
-  });
+  const [formData, setFormData] = useState<FormDataState>(initialFormData);
 
   const [defects, setDefects] = useState<Defect[]>([]);
 
-  // Custom "Other" input values for dropdowns
-  const [customQcInspector, setCustomQcInspector] = useState('');
-  const [customCustomer, setCustomCustomer] = useState('');
-  const [customMerchant, setCustomMerchant] = useState('');
+  // Custom options from localStorage
+  const [customQcInspectors, setCustomQcInspectors] = useState<string[]>([]);
+  const [customMerchants, setCustomMerchants] = useState<string[]>([]);
+  const [customBuyerDesigns, setCustomBuyerDesigns] = useState<string[]>([]);
+  const [customSizesCm, setCustomSizesCm] = useState<string[]>([]);
+  const [customSizesFeet, setCustomSizesFeet] = useState<string[]>([]);
+  const [sizeUnit, setSizeUnit] = useState<SizeUnit>('cm');
+  const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
+
+  // Firestore customers (synced with TED forms)
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customersLoading, setCustomersLoading] = useState(true);
+
+  // Load customers from Firestore on mount
+  useEffect(() => {
+    async function loadCustomers() {
+      try {
+        const firestoreCustomers = await getCustomers();
+        setCustomers(firestoreCustomers);
+      } catch (error) {
+        console.error('Error loading customers:', error);
+      } finally {
+        setCustomersLoading(false);
+      }
+    }
+    loadCustomers();
+  }, []);
+
+  // Load custom options from localStorage on mount
+  useEffect(() => {
+    setCustomQcInspectors(getCustomOptions(CUSTOM_OPTIONS_KEYS.qcInspectors));
+    setCustomMerchants(getCustomOptions(CUSTOM_OPTIONS_KEYS.merchants));
+    setCustomBuyerDesigns(getCustomOptions(CUSTOM_OPTIONS_KEYS.buyerDesigns));
+    setCustomSizesCm(getCustomOptions(CUSTOM_OPTIONS_KEYS.customSizesCm));
+    setCustomSizesFeet(getCustomOptions(CUSTOM_OPTIONS_KEYS.customSizesFeet));
+  }, []);
+
+  // Update formData.productSizes when selectedSizes changes
+  useEffect(() => {
+    const sizesString = selectedSizes.join(', ');
+    setFormData(prev => ({ ...prev, productSizes: sizesString }));
+  }, [selectedSizes]);
+
+  // Handlers to add and save custom options
+  const addCustomQcInspector = (value: string) => {
+    const updated = [...customQcInspectors, value];
+    setCustomQcInspectors(updated);
+    saveCustomOptions(CUSTOM_OPTIONS_KEYS.qcInspectors, updated);
+  };
+
+  const addCustomMerchant = (value: string) => {
+    const updated = [...customMerchants, value];
+    setCustomMerchants(updated);
+    saveCustomOptions(CUSTOM_OPTIONS_KEYS.merchants, updated);
+  };
+
+  const addCustomBuyerDesign = (value: string) => {
+    const updated = [...customBuyerDesigns, value];
+    setCustomBuyerDesigns(updated);
+    saveCustomOptions(CUSTOM_OPTIONS_KEYS.buyerDesigns, updated);
+  };
+
+  const addCustomSize = (value: string) => {
+    if (sizeUnit === 'cm') {
+      const updated = [...customSizesCm, value];
+      setCustomSizesCm(updated);
+      saveCustomOptions(CUSTOM_OPTIONS_KEYS.customSizesCm, updated);
+    } else {
+      const updated = [...customSizesFeet, value];
+      setCustomSizesFeet(updated);
+      saveCustomOptions(CUSTOM_OPTIONS_KEYS.customSizesFeet, updated);
+    }
+    // Also add to selected sizes
+    if (!selectedSizes.includes(value)) {
+      setSelectedSizes(prev => [...prev, value]);
+    }
+  };
+
+  const toggleSize = (size: string) => {
+    setSelectedSizes(prev =>
+      prev.includes(size)
+        ? prev.filter(s => s !== size)
+        : [...prev, size]
+    );
+  };
+
+  const removeSize = (size: string) => {
+    setSelectedSizes(prev => prev.filter(s => s !== size));
+  };
+
+  // Add customer to Firestore (synced with TED forms)
+  const handleAddCustomer = async (customer: Customer) => {
+    try {
+      await addCustomer(customer);
+      // Refresh customers list from Firestore
+      const updatedCustomers = await getCustomers();
+      setCustomers(updatedCustomers);
+    } catch (error) {
+      console.error('Error adding customer:', error);
+      alert('Failed to add customer. Please try again.');
+    }
+  };
+
+  // Handle customer selection - auto-fill customer code
+  const handleCustomerChange = (name: string, code: string) => {
+    setFormData(prev => ({
+      ...prev,
+      customerName: name,
+      customerCode: code
+    }));
+  };
+
+  // NOT OK photo state
+  const [notOkPhotos, setNotOkPhotos] = useState<Record<string, File | null>>({});
+  const [notOkPreviews, setNotOkPreviews] = useState<Record<string, string>>({});
+
+  const handleNotOkPhotoChange = (fieldKey: string, file: File | null) => {
+    setNotOkPhotos(prev => ({ ...prev, [fieldKey]: file }));
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setNotOkPreviews(prev => ({ ...prev, [fieldKey]: e.target?.result as string }));
+      };
+      reader.readAsDataURL(file);
+    } else {
+      setNotOkPreviews(prev => ({ ...prev, [fieldKey]: '' }));
+    }
+  };
 
   const [photos, setPhotos] = useState<Record<PhotoKey, File | null>>({
     approvedSamplePhoto: null,
@@ -148,12 +621,6 @@ export function FinalInspectionForm() {
   const [otherPhotos, setOtherPhotos] = useState<File[]>([]);
   const [otherPreviews, setOtherPreviews] = useState<string[]>([]);
 
-  // Update document number when company changes
-  const handleCompanyChange = (company: Company) => {
-    const documentNo = company === 'EHI' ? 'EHI/IP/01' : 'EMPL/IP/01';
-    setFormData({ ...formData, company, documentNo });
-  };
-
   const handlePhotoChange = (key: PhotoKey, file: File | null) => {
     setPhotos(prev => ({ ...prev, [key]: file }));
     if (file) {
@@ -184,21 +651,6 @@ export function FinalInspectionForm() {
   const removeOtherPhoto = (index: number) => {
     setOtherPhotos(prev => prev.filter((_, i) => i !== index));
     setOtherPreviews(prev => prev.filter((_, i) => i !== index));
-  };
-
-  // Defect management
-  const addDefect = () => {
-    setDefects([...defects, { defectCode: '', majorCount: 0, minorCount: 0, description: '' }]);
-  };
-
-  const updateDefect = (index: number, field: keyof Defect, value: string | number) => {
-    const updated = [...defects];
-    updated[index] = { ...updated[index], [field]: value };
-    setDefects(updated);
-  };
-
-  const removeDefect = (index: number) => {
-    setDefects(defects.filter((_, i) => i !== index));
   };
 
   const uploadPhoto = async (file: File, path: string): Promise<string> => {
@@ -239,15 +691,26 @@ export function FinalInspectionForm() {
         otherPhotoUrls.push(url);
       }
 
+      // Upload NOT OK photos
+      const notOkPhotoUrls: NotOkPhoto[] = [];
+      for (const [fieldKey, file] of Object.entries(notOkPhotos)) {
+        if (file) {
+          const url = await uploadPhoto(
+            file,
+            `final-inspection-images/${timestamp}_notok_${fieldKey}_${file.name}`
+          );
+          notOkPhotoUrls.push({ field: fieldKey, photo: url });
+        }
+      }
+
       const inspection: FinalInspection = {
         // Company & Document
         company: formData.company,
         documentNo: formData.documentNo,
-
         // Basic Info
         inspectionDate: formData.inspectionDate,
-        qcInspectorName: formData.qcInspectorName === 'Other' ? customQcInspector : formData.qcInspectorName,
-        customerName: formData.customerName === 'Other' ? customCustomer : formData.customerName,
+        qcInspectorName: formData.qcInspectorName,
+        customerName: formData.customerName,
         customerCode: formData.customerCode,
         customerPoNo: formData.customerPoNo,
         opsNo: formData.opsNo,
@@ -255,8 +718,7 @@ export function FinalInspectionForm() {
         emplDesignNo: formData.emplDesignNo,
         colorName: formData.colorName,
         productSizes: formData.productSizes,
-        merchant: formData.merchant === 'Other' ? customMerchant : formData.merchant,
-
+        merchant: formData.merchant,
         // Quantities
         totalOrderQty: Number(formData.totalOrderQty),
         inspectedLotQty: Number(formData.inspectedLotQty),
@@ -264,58 +726,52 @@ export function FinalInspectionForm() {
         sampleSize: Number(formData.sampleSize),
         acceptedQty: Number(formData.acceptedQty),
         rejectedQty: Number(formData.rejectedQty),
-
         // Product Quality Checks
-        approvedSampleAvailable: formData.approvedSampleAvailable as 'Yes' | 'No',
+        approvedSampleAvailable: formData.approvedSampleAvailable,
         materialFibreContent: formData.materialFibreContent,
-        motifDesignCheck: formData.motifDesignCheck as 'OK' | 'NOT OK',
+        motifDesignCheck: formData.motifDesignCheck,
         tuftDensity: formData.tuftDensity,
-        backing: formData.backing as 'OK' | 'NOT OK',
+        backing: formData.backing,
         backingNotes: formData.backingNotes,
-        bindingAndEdges: formData.bindingAndEdges as 'OK' | 'NOT OK',
-        handFeel: formData.handFeel as 'OK' | 'NOT OK',
+        bindingAndEdges: formData.bindingAndEdges,
+        handFeel: formData.handFeel,
         pileHeight: formData.pileHeight,
-        embossingCarving: formData.embossingCarving as 'OK' | 'NOT OK',
-        workmanship: formData.workmanship as 'OK' | 'NOT OK',
-        productQualityWeight: formData.productQualityWeight as 'OK' | 'NOT OK',
+        embossingCarving: formData.embossingCarving,
+        workmanship: formData.workmanship,
+        productQualityWeight: formData.productQualityWeight,
         productWeight: formData.productWeight,
         sizeTolerance: formData.sizeTolerance,
         finishingPercent: formData.finishingPercent,
         packedPercent: formData.packedPercent,
-
         // Labeling & Marking
-        labelPlacement: formData.labelPlacement as 'OK' | 'NOT OK',
-        sideMarking: formData.sideMarking as 'OK' | 'NOT OK',
-        outerMarking: formData.outerMarking as 'OK' | 'NOT OK',
-        innerPack: formData.innerPack as 'OK' | 'NOT OK',
-        careLabels: formData.careLabels as 'OK' | 'NOT OK',
-        skuStickers: formData.skuStickers as 'OK' | 'NOT OK',
-        upcBarcodes: formData.upcBarcodes as 'OK' | 'NOT OK',
-
+        labelPlacement: formData.labelPlacement,
+        sideMarking: formData.sideMarking,
+        outerMarking: formData.outerMarking,
+        innerPack: formData.innerPack,
+        careLabels: formData.careLabels,
+        skuStickers: formData.skuStickers,
+        upcBarcodes: formData.upcBarcodes,
         // Packaging
         cartonPly: formData.cartonPly,
-        cartonDropTest: formData.cartonDropTest as 'OK' | 'NOT OK',
-        packingType: formData.packingType as 'Assorted' | 'Solid',
+        cartonDropTest: formData.cartonDropTest,
+        packingType: formData.packingType,
         grossWeight: formData.grossWeight,
         netWeight: formData.netWeight,
-        cartonBaleNumbering: formData.cartonBaleNumbering as 'OK' | 'NOT OK',
+        cartonBaleNumbering: formData.cartonBaleNumbering,
         pcsPerCartonBale: formData.pcsPerCartonBale,
         pcsPerPolybag: formData.pcsPerPolybag,
         cartonMeasurementL: formData.cartonMeasurementL,
         cartonMeasurementW: formData.cartonMeasurementW,
         cartonMeasurementH: formData.cartonMeasurementH,
-
-        // Original Checks (kept for compatibility)
-        cartonDimension: formData.cartonDimension as 'OK' | 'NOT OK',
-        productLabel: formData.productLabel as 'OK' | 'NOT OK',
-        cartonLabel: formData.cartonLabel as 'OK' | 'NOT OK',
-        barcodeScan: formData.barcodeScan as 'OK' | 'NOT OK',
-
+        // Original checks (compatibility)
+        cartonDimension: formData.cartonDimension,
+        productLabel: formData.productLabel,
+        cartonLabel: formData.cartonLabel,
+        barcodeScan: formData.barcodeScan,
         // Defect Tracking
         dpciSkuStyleNumber: formData.dpciSkuStyleNumber,
         styleDescription: formData.styleDescription,
         defects: defects,
-
         // Photos
         approvedSamplePhoto: photoUrls.approvedSamplePhoto || '',
         idPhoto: photoUrls.idPhoto || '',
@@ -329,9 +785,13 @@ export function FinalInspectionForm() {
         inspectedSamplesPhoto: photoUrls.inspectedSamplesPhoto || '',
         metalCheckingPhoto: photoUrls.metalCheckingPhoto || '',
         otherPhotos: otherPhotoUrls,
-
+        // NOT OK photos
+        notOkPhotos: notOkPhotoUrls,
+        // Size unit
+        sizeUnit: sizeUnit,
+        // Results
         qcInspectorRemarks: formData.qcInspectorRemarks,
-        inspectionResult: formData.inspectionResult as 'PASS' | 'FAIL',
+        inspectionResult: formData.inspectionResult,
         createdAt: new Date().toISOString()
       };
 
@@ -360,13 +820,12 @@ export function FinalInspectionForm() {
 
         const resultColor = inspection.inspectionResult === 'PASS' ? '#22c55e' : '#ef4444';
         const resultBg = inspection.inspectionResult === 'PASS' ? '#dcfce7' : '#fee2e2';
-        const companyName = COMPANY_NAMES[inspection.company];
 
         const emailHtml = `
           <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
             <div style="background: #059669; color: white; padding: 20px; text-align: center;">
-              <h1 style="margin: 0;">${companyName}</h1>
-              <p style="margin: 5px 0 0;">Final Inspection Report - ${inspection.documentNo}</p>
+              <h1 style="margin: 0;">Eastern Mills</h1>
+              <p style="margin: 5px 0 0;">Final Inspection Report</p>
             </div>
 
             <div style="background: ${resultBg}; padding: 20px; text-align: center; border-bottom: 3px solid ${resultColor};">
@@ -398,54 +857,13 @@ export function FinalInspectionForm() {
                 <tr><td style="padding: 8px 0; color: #6b7280;">Rejected:</td><td style="padding: 8px 0; color: #ef4444; font-weight: bold;">${inspection.rejectedQty}</td></tr>
               </table>
 
-              <h3 style="color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; margin-top: 20px;">Product Quality</h3>
+              <h3 style="color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; margin-top: 20px;">Quality Checks</h3>
               <table style="width: 100%; border-collapse: collapse;">
-                <tr><td style="padding: 8px 0; color: #6b7280;">Approved Sample Available:</td><td style="padding: 8px 0;">${inspection.approvedSampleAvailable}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Material/Fibre Content:</td><td style="padding: 8px 0;">${inspection.materialFibreContent}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Motif/Design Check:</td><td style="padding: 8px 0;">${inspection.motifDesignCheck}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Backing:</td><td style="padding: 8px 0;">${inspection.backing}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Binding/Edges:</td><td style="padding: 8px 0;">${inspection.bindingAndEdges}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Hand Feel:</td><td style="padding: 8px 0;">${inspection.handFeel}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Workmanship:</td><td style="padding: 8px 0;">${inspection.workmanship}</td></tr>
+                <tr><td style="padding: 8px 0; color: #6b7280;">Carton Dimension:</td><td style="padding: 8px 0;">${inspection.cartonDimension}</td></tr>
+                <tr><td style="padding: 8px 0; color: #6b7280;">Product Label:</td><td style="padding: 8px 0;">${inspection.productLabel}</td></tr>
+                <tr><td style="padding: 8px 0; color: #6b7280;">Carton Label:</td><td style="padding: 8px 0;">${inspection.cartonLabel}</td></tr>
+                <tr><td style="padding: 8px 0; color: #6b7280;">Barcode Scan:</td><td style="padding: 8px 0;">${inspection.barcodeScan}</td></tr>
               </table>
-
-              <h3 style="color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; margin-top: 20px;">Labeling & Marking</h3>
-              <table style="width: 100%; border-collapse: collapse;">
-                <tr><td style="padding: 8px 0; color: #6b7280;">Label Placement:</td><td style="padding: 8px 0;">${inspection.labelPlacement}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Side Marking:</td><td style="padding: 8px 0;">${inspection.sideMarking}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Care Labels:</td><td style="padding: 8px 0;">${inspection.careLabels}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">SKU Stickers:</td><td style="padding: 8px 0;">${inspection.skuStickers}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">UPC Barcodes:</td><td style="padding: 8px 0;">${inspection.upcBarcodes}</td></tr>
-              </table>
-
-              <h3 style="color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; margin-top: 20px;">Packaging</h3>
-              <table style="width: 100%; border-collapse: collapse;">
-                <tr><td style="padding: 8px 0; color: #6b7280;">Carton Ply:</td><td style="padding: 8px 0;">${inspection.cartonPly}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Carton Drop Test:</td><td style="padding: 8px 0;">${inspection.cartonDropTest}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Packing Type:</td><td style="padding: 8px 0;">${inspection.packingType}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Gross/Net Weight:</td><td style="padding: 8px 0;">${inspection.grossWeight} / ${inspection.netWeight}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Carton Dimensions:</td><td style="padding: 8px 0;">${inspection.cartonMeasurementL} x ${inspection.cartonMeasurementW} x ${inspection.cartonMeasurementH}</td></tr>
-              </table>
-
-              ${inspection.defects.length > 0 ? `
-                <h3 style="color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; margin-top: 20px;">Defects Found</h3>
-                <table style="width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb;">
-                  <tr style="background: #f3f4f6;">
-                    <th style="padding: 8px; border: 1px solid #e5e7eb; text-align: left;">Code</th>
-                    <th style="padding: 8px; border: 1px solid #e5e7eb; text-align: left;">Description</th>
-                    <th style="padding: 8px; border: 1px solid #e5e7eb; text-align: center;">Major</th>
-                    <th style="padding: 8px; border: 1px solid #e5e7eb; text-align: center;">Minor</th>
-                  </tr>
-                  ${inspection.defects.map(d => `
-                    <tr>
-                      <td style="padding: 8px; border: 1px solid #e5e7eb;">${d.defectCode}</td>
-                      <td style="padding: 8px; border: 1px solid #e5e7eb;">${d.description}</td>
-                      <td style="padding: 8px; border: 1px solid #e5e7eb; text-align: center; color: #ef4444;">${d.majorCount}</td>
-                      <td style="padding: 8px; border: 1px solid #e5e7eb; text-align: center; color: #f59e0b;">${d.minorCount}</td>
-                    </tr>
-                  `).join('')}
-                </table>
-              ` : ''}
 
               <h3 style="color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; margin-top: 20px;">QC Remarks</h3>
               <p style="color: #374151;">${inspection.qcInspectorRemarks || 'No remarks'}</p>
@@ -464,7 +882,7 @@ export function FinalInspectionForm() {
             </div>
 
             <div style="background: #f3f4f6; padding: 15px; text-align: center; color: #6b7280; font-size: 12px;">
-              <p>${companyName} QC System - Final Inspection Report</p>
+              <p>Eastern Mills QC System - Final Inspection Report</p>
             </div>
           </div>
         `;
@@ -474,7 +892,7 @@ export function FinalInspectionForm() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             to: recipients,
-            subject: `Final Inspection: ${inspection.customerName} - ${inspection.buyerDesignName} [${inspection.inspectionResult}] - ${inspection.documentNo}`,
+            subject: `Final Inspection: ${inspection.customerName} - ${inspection.buyerDesignName} [${inspection.inspectionResult}]`,
             html: emailHtml,
             pdfBase64,
             pdfFilename: `Final_Inspection_${inspection.opsNo}_${inspection.inspectionDate}.pdf`
@@ -485,69 +903,13 @@ export function FinalInspectionForm() {
       setSuccess(true);
       // Reset form
       setFormData({
-        company: 'EHI',
-        documentNo: 'EHI/IP/01',
-        inspectionDate: new Date().toISOString().split('T')[0],
-        qcInspectorName: '',
-        customerName: '',
-        customerCode: '',
-        customerPoNo: '',
-        opsNo: '',
-        buyerDesignName: '',
-        emplDesignNo: '',
-        colorName: '',
-        productSizes: '',
-        merchant: '',
-        totalOrderQty: '',
-        inspectedLotQty: '',
-        aql: '2.5',
-        sampleSize: '',
-        acceptedQty: '',
-        rejectedQty: '',
-        approvedSampleAvailable: 'Yes',
-        materialFibreContent: '',
-        motifDesignCheck: 'OK',
-        tuftDensity: '',
-        backing: 'OK',
-        backingNotes: '',
-        bindingAndEdges: 'OK',
-        handFeel: 'OK',
-        pileHeight: '',
-        embossingCarving: 'OK',
-        workmanship: 'OK',
-        productQualityWeight: 'OK',
-        productWeight: '',
-        sizeTolerance: '',
-        finishingPercent: '',
-        packedPercent: '',
-        labelPlacement: 'OK',
-        sideMarking: 'OK',
-        outerMarking: 'OK',
-        innerPack: 'OK',
-        careLabels: 'OK',
-        skuStickers: 'OK',
-        upcBarcodes: 'OK',
-        cartonPly: '',
-        cartonDropTest: 'OK',
-        packingType: 'Solid',
-        grossWeight: '',
-        netWeight: '',
-        cartonBaleNumbering: 'OK',
-        pcsPerCartonBale: '',
-        pcsPerPolybag: '',
-        cartonMeasurementL: '',
-        cartonMeasurementW: '',
-        cartonMeasurementH: '',
-        cartonDimension: 'OK',
-        productLabel: 'OK',
-        cartonLabel: 'OK',
-        barcodeScan: 'OK',
-        dpciSkuStyleNumber: '',
-        styleDescription: '',
-        qcInspectorRemarks: '',
-        inspectionResult: 'PASS'
+        ...initialFormData,
+        inspectionDate: new Date().toISOString().split('T')[0]
       });
       setDefects([]);
+      setNotOkPhotos({});
+      setNotOkPreviews({});
+      setSizeUnit('cm');
       setPhotos({
         approvedSamplePhoto: null,
         idPhoto: null,
@@ -576,9 +938,6 @@ export function FinalInspectionForm() {
       });
       setOtherPhotos([]);
       setOtherPreviews([]);
-      setCustomQcInspector('');
-      setCustomCustomer('');
-      setCustomMerchant('');
 
     } catch (error) {
       console.error('Error submitting inspection:', error);
@@ -591,68 +950,6 @@ export function FinalInspectionForm() {
   const inputClass = "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500";
   const labelClass = "block text-sm font-medium text-gray-700 mb-1";
 
-  // Helper component for OK/NOT OK radio buttons
-  const OkNotOkField = ({ field, label }: { field: string; label: string }) => (
-    <div>
-      <label className={labelClass}>{label}</label>
-      <div className="flex gap-3">
-        <label className="flex items-center gap-2">
-          <input
-            type="radio"
-            name={field}
-            value="OK"
-            checked={formData[field as keyof typeof formData] === 'OK'}
-            onChange={(e) => setFormData({ ...formData, [field]: e.target.value })}
-            className="text-emerald-600"
-          />
-          <span className="text-sm text-green-600 font-medium">OK</span>
-        </label>
-        <label className="flex items-center gap-2">
-          <input
-            type="radio"
-            name={field}
-            value="NOT OK"
-            checked={formData[field as keyof typeof formData] === 'NOT OK'}
-            onChange={(e) => setFormData({ ...formData, [field]: e.target.value })}
-            className="text-red-600"
-          />
-          <span className="text-sm text-red-600 font-medium">NOT OK</span>
-        </label>
-      </div>
-    </div>
-  );
-
-  // Helper component for Yes/No radio buttons
-  const YesNoField = ({ field, label }: { field: string; label: string }) => (
-    <div>
-      <label className={labelClass}>{label}</label>
-      <div className="flex gap-3">
-        <label className="flex items-center gap-2">
-          <input
-            type="radio"
-            name={field}
-            value="Yes"
-            checked={formData[field as keyof typeof formData] === 'Yes'}
-            onChange={(e) => setFormData({ ...formData, [field]: e.target.value })}
-            className="text-emerald-600"
-          />
-          <span className="text-sm text-green-600 font-medium">Yes</span>
-        </label>
-        <label className="flex items-center gap-2">
-          <input
-            type="radio"
-            name={field}
-            value="No"
-            checked={formData[field as keyof typeof formData] === 'No'}
-            onChange={(e) => setFormData({ ...formData, [field]: e.target.value })}
-            className="text-red-600"
-          />
-          <span className="text-sm text-red-600 font-medium">No</span>
-        </label>
-      </div>
-    </div>
-  );
-
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       {success && (
@@ -661,35 +958,6 @@ export function FinalInspectionForm() {
           <span className="text-emerald-700">Inspection submitted successfully!</span>
         </div>
       )}
-
-      {/* Company & Document */}
-      <div className="bg-white rounded-lg shadow-sm border p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Company & Document</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className={labelClass}>Company *</label>
-            <select
-              required
-              value={formData.company}
-              onChange={(e) => handleCompanyChange(e.target.value as Company)}
-              className={inputClass}
-            >
-              {COMPANIES.map(company => (
-                <option key={company} value={company}>{COMPANY_NAMES[company]}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className={labelClass}>Document No.</label>
-            <input
-              type="text"
-              value={formData.documentNo}
-              readOnly
-              className={`${inputClass} bg-gray-100`}
-            />
-          </div>
-        </div>
-      </div>
 
       {/* Basic Info */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
@@ -705,34 +973,16 @@ export function FinalInspectionForm() {
               className={inputClass}
             />
           </div>
-          <div>
-            <label className={labelClass}>QC Inspector *</label>
-            <select
-              required={formData.qcInspectorName !== 'Other'}
-              value={formData.qcInspectorName}
-              onChange={(e) => {
-                setFormData({ ...formData, qcInspectorName: e.target.value });
-                if (e.target.value !== 'Other') setCustomQcInspector('');
-              }}
-              className={inputClass}
-            >
-              <option value="">Select Inspector</option>
-              {QC_INSPECTORS.map(name => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-              <option value="Other">Other</option>
-            </select>
-            {formData.qcInspectorName === 'Other' && (
-              <input
-                type="text"
-                required
-                value={customQcInspector}
-                onChange={(e) => setCustomQcInspector(e.target.value)}
-                className={`${inputClass} mt-2`}
-                placeholder="Enter inspector name"
-              />
-            )}
-          </div>
+          <DropdownWithAdd
+            label="QC Inspector"
+            value={formData.qcInspectorName}
+            onChange={(value) => setFormData({ ...formData, qcInspectorName: value })}
+            options={QC_INSPECTORS}
+            customOptions={customQcInspectors}
+            onAddCustom={addCustomQcInspector}
+            required
+            placeholder="Select Inspector"
+          />
         </div>
       </div>
 
@@ -740,33 +990,14 @@ export function FinalInspectionForm() {
       <div className="bg-white rounded-lg shadow-sm border p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Order Information</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className={labelClass}>Customer Name *</label>
-            <select
-              required={formData.customerName !== 'Other'}
-              value={formData.customerName}
-              onChange={(e) => {
-                setFormData({ ...formData, customerName: e.target.value });
-                if (e.target.value !== 'Other') setCustomCustomer('');
-              }}
-              className={inputClass}
-            >
-              <option value="">Select Customer</option>
-              {CUSTOMERS.map(name => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </select>
-            {formData.customerName === 'Other' && (
-              <input
-                type="text"
-                required
-                value={customCustomer}
-                onChange={(e) => setCustomCustomer(e.target.value)}
-                className={`${inputClass} mt-2`}
-                placeholder="Enter customer name"
-              />
-            )}
-          </div>
+          <CustomerDropdown
+            customerName={formData.customerName}
+            customers={customers}
+            onCustomerChange={handleCustomerChange}
+            onAddCustomer={handleAddCustomer}
+            required
+            loading={customersLoading}
+          />
           <div>
             <label className={labelClass}>Customer Code *</label>
             <input
@@ -775,6 +1006,8 @@ export function FinalInspectionForm() {
               value={formData.customerCode}
               onChange={(e) => setFormData({ ...formData, customerCode: e.target.value })}
               className={inputClass}
+              placeholder={customersLoading ? "Loading..." : "Auto-filled from customer"}
+              readOnly={!!formData.customerName && customers.some(c => c.name === formData.customerName)}
             />
           </div>
           <div>
@@ -797,17 +1030,16 @@ export function FinalInspectionForm() {
               className={inputClass}
             />
           </div>
-          <div>
-            <label className={labelClass}>Buyer Design Name *</label>
-            <input
-              type="text"
-              required
-              value={formData.buyerDesignName}
-              onChange={(e) => setFormData({ ...formData, buyerDesignName: e.target.value })}
-              className={inputClass}
-              placeholder="Enter design name"
-            />
-          </div>
+          <DropdownWithAdd
+            label="Buyer Design Name"
+            value={formData.buyerDesignName}
+            onChange={(value) => setFormData({ ...formData, buyerDesignName: value })}
+            options={[]}
+            customOptions={customBuyerDesigns}
+            onAddCustom={addCustomBuyerDesign}
+            required
+            placeholder="Select/Add Design"
+          />
           <div>
             <label className={labelClass}>EMPL Design No. *</label>
             <input
@@ -828,45 +1060,112 @@ export function FinalInspectionForm() {
               className={inputClass}
             />
           </div>
-          <div>
-            <label className={labelClass}>Product Sizes *</label>
+          <div className="md:col-span-2">
+            <div className="flex items-center justify-between mb-2">
+              <label className={labelClass}>Product Sizes *</label>
+              <div className="flex border border-gray-300 rounded-lg overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setSizeUnit('cm')}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                    sizeUnit === 'cm'
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  cm
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSizeUnit('feet')}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                    sizeUnit === 'feet'
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  feet
+                </button>
+              </div>
+            </div>
+
+            {/* Selected sizes */}
+            {selectedSizes.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {selectedSizes.map(size => (
+                  <span
+                    key={size}
+                    className="inline-flex items-center gap-1 px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full text-sm font-medium"
+                  >
+                    {size}
+                    <button
+                      type="button"
+                      onClick={() => removeSize(size)}
+                      className="hover:text-emerald-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Standard sizes as clickable tags */}
+            <div className="flex flex-wrap gap-2 items-center">
+              {(sizeUnit === 'cm' ? [...STANDARD_SIZES_CM, ...customSizesCm] : [...STANDARD_SIZES_FEET, ...customSizesFeet]).map(size => (
+                <button
+                  key={size}
+                  type="button"
+                  onClick={() => toggleSize(size)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                    selectedSizes.includes(size)
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white text-gray-700 border-gray-300 hover:border-emerald-400 hover:text-emerald-600'
+                  }`}
+                >
+                  {size}
+                </button>
+              ))}
+
+              {/* Add custom size button */}
+              <button
+                type="button"
+                onClick={() => {
+                  const newSize = prompt(`Enter custom size (${sizeUnit}):`);
+                  if (newSize && newSize.trim()) {
+                    addCustomSize(newSize.trim());
+                  }
+                }}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium border border-dashed border-gray-400 text-gray-600 hover:border-emerald-500 hover:text-emerald-600 transition-colors flex items-center gap-1"
+              >
+                <Plus className="w-4 h-4" />
+                Add Size
+              </button>
+            </div>
+
+            {/* Hidden required input for form validation */}
             <input
               type="text"
               required
               value={formData.productSizes}
-              onChange={(e) => setFormData({ ...formData, productSizes: e.target.value })}
-              className={inputClass}
-              placeholder="e.g., 5x8, 6x9, 8x10"
+              onChange={() => {}}
+              className="sr-only"
+              tabIndex={-1}
             />
-          </div>
-          <div>
-            <label className={labelClass}>Merchant *</label>
-            <select
-              required={formData.merchant !== 'Other'}
-              value={formData.merchant}
-              onChange={(e) => {
-                setFormData({ ...formData, merchant: e.target.value });
-                if (e.target.value !== 'Other') setCustomMerchant('');
-              }}
-              className={inputClass}
-            >
-              <option value="">Select Merchant</option>
-              {MERCHANTS.map(name => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-              <option value="Other">Other</option>
-            </select>
-            {formData.merchant === 'Other' && (
-              <input
-                type="text"
-                required
-                value={customMerchant}
-                onChange={(e) => setCustomMerchant(e.target.value)}
-                className={`${inputClass} mt-2`}
-                placeholder="Enter merchant name"
-              />
+            {selectedSizes.length === 0 && (
+              <p className="text-xs text-gray-500 mt-2">Click sizes to select, or add a custom size</p>
             )}
           </div>
+          <DropdownWithAdd
+            label="Merchant"
+            value={formData.merchant}
+            onChange={(value) => setFormData({ ...formData, merchant: value })}
+            options={MERCHANTS}
+            customOptions={customMerchants}
+            onAddCustom={addCustomMerchant}
+            required
+            placeholder="Select Merchant"
+          />
         </div>
       </div>
 
@@ -945,309 +1244,6 @@ export function FinalInspectionForm() {
         </div>
       </div>
 
-      {/* Product Quality Checks */}
-      <div className="bg-white rounded-lg shadow-sm border p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Product Quality Checks</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          <YesNoField field="approvedSampleAvailable" label="Approved Sample Available" />
-          <div>
-            <label className={labelClass}>Material/Fibre Content</label>
-            <select
-              value={formData.materialFibreContent}
-              onChange={(e) => setFormData({ ...formData, materialFibreContent: e.target.value })}
-              className={inputClass}
-            >
-              <option value="">Select Material</option>
-              {MATERIAL_TYPES.map(type => (
-                <option key={type} value={type}>{type}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-          <OkNotOkField field="motifDesignCheck" label="Motif/Design Check" />
-          <OkNotOkField field="backing" label="Backing" />
-          <OkNotOkField field="bindingAndEdges" label="Binding & Edges" />
-          <OkNotOkField field="handFeel" label="Hand Feel" />
-          <OkNotOkField field="embossingCarving" label="Embossing/Carving" />
-          <OkNotOkField field="workmanship" label="Workmanship" />
-          <OkNotOkField field="productQualityWeight" label="Weight Check" />
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div>
-            <label className={labelClass}>Tuft Density</label>
-            <input
-              type="text"
-              value={formData.tuftDensity}
-              onChange={(e) => setFormData({ ...formData, tuftDensity: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Backing Notes</label>
-            <input
-              type="text"
-              value={formData.backingNotes}
-              onChange={(e) => setFormData({ ...formData, backingNotes: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Pile Height</label>
-            <input
-              type="text"
-              value={formData.pileHeight}
-              onChange={(e) => setFormData({ ...formData, pileHeight: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Product Weight</label>
-            <input
-              type="text"
-              value={formData.productWeight}
-              onChange={(e) => setFormData({ ...formData, productWeight: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Size Tolerance</label>
-            <input
-              type="text"
-              value={formData.sizeTolerance}
-              onChange={(e) => setFormData({ ...formData, sizeTolerance: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Finishing %</label>
-            <input
-              type="text"
-              value={formData.finishingPercent}
-              onChange={(e) => setFormData({ ...formData, finishingPercent: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Packed %</label>
-            <input
-              type="text"
-              value={formData.packedPercent}
-              onChange={(e) => setFormData({ ...formData, packedPercent: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Labeling & Marking */}
-      <div className="bg-white rounded-lg shadow-sm border p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Labeling & Marking</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <OkNotOkField field="labelPlacement" label="Label Placement" />
-          <OkNotOkField field="sideMarking" label="Side Marking" />
-          <OkNotOkField field="outerMarking" label="Outer Marking" />
-          <OkNotOkField field="innerPack" label="Inner Pack" />
-          <OkNotOkField field="careLabels" label="Care Labels" />
-          <OkNotOkField field="skuStickers" label="SKU Stickers" />
-          <OkNotOkField field="upcBarcodes" label="UPC Barcodes" />
-        </div>
-      </div>
-
-      {/* Packaging */}
-      <div className="bg-white rounded-lg shadow-sm border p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Packaging</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-          <div>
-            <label className={labelClass}>Carton Ply</label>
-            <input
-              type="text"
-              value={formData.cartonPly}
-              onChange={(e) => setFormData({ ...formData, cartonPly: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <OkNotOkField field="cartonDropTest" label="Carton Drop Test" />
-          <div>
-            <label className={labelClass}>Packing Type</label>
-            <select
-              value={formData.packingType}
-              onChange={(e) => setFormData({ ...formData, packingType: e.target.value })}
-              className={inputClass}
-            >
-              <option value="Solid">Solid</option>
-              <option value="Assorted">Assorted</option>
-            </select>
-          </div>
-          <OkNotOkField field="cartonBaleNumbering" label="Carton/Bale Numbering" />
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div>
-            <label className={labelClass}>Gross Weight</label>
-            <input
-              type="text"
-              value={formData.grossWeight}
-              onChange={(e) => setFormData({ ...formData, grossWeight: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Net Weight</label>
-            <input
-              type="text"
-              value={formData.netWeight}
-              onChange={(e) => setFormData({ ...formData, netWeight: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Pcs/Carton or Bale</label>
-            <input
-              type="text"
-              value={formData.pcsPerCartonBale}
-              onChange={(e) => setFormData({ ...formData, pcsPerCartonBale: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Pcs/Polybag</label>
-            <input
-              type="text"
-              value={formData.pcsPerPolybag}
-              onChange={(e) => setFormData({ ...formData, pcsPerPolybag: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-        </div>
-        <div className="grid grid-cols-3 gap-4 mt-4">
-          <div>
-            <label className={labelClass}>Carton L (cm)</label>
-            <input
-              type="text"
-              value={formData.cartonMeasurementL}
-              onChange={(e) => setFormData({ ...formData, cartonMeasurementL: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Carton W (cm)</label>
-            <input
-              type="text"
-              value={formData.cartonMeasurementW}
-              onChange={(e) => setFormData({ ...formData, cartonMeasurementW: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Carton H (cm)</label>
-            <input
-              type="text"
-              value={formData.cartonMeasurementH}
-              onChange={(e) => setFormData({ ...formData, cartonMeasurementH: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Defect Tracking */}
-      <div className="bg-white rounded-lg shadow-sm border p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Defect Tracking</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className={labelClass}>DPCI/SKU/Style Number</label>
-            <input
-              type="text"
-              value={formData.dpciSkuStyleNumber}
-              onChange={(e) => setFormData({ ...formData, dpciSkuStyleNumber: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Style Description</label>
-            <input
-              type="text"
-              value={formData.styleDescription}
-              onChange={(e) => setFormData({ ...formData, styleDescription: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-        </div>
-
-        {/* Defects List */}
-        <div className="space-y-3">
-          {defects.map((defect, index) => (
-            <div key={index} className="flex gap-3 items-start bg-gray-50 p-3 rounded-lg">
-              <div className="flex-1">
-                <label className={labelClass}>Defect Code</label>
-                <select
-                  value={defect.defectCode}
-                  onChange={(e) => {
-                    const selectedDefect = DEFECT_CODES.find(d => d.code === e.target.value);
-                    updateDefect(index, 'defectCode', e.target.value);
-                    if (selectedDefect) {
-                      updateDefect(index, 'description', selectedDefect.description);
-                    }
-                  }}
-                  className={inputClass}
-                >
-                  <option value="">Select Code</option>
-                  {DEFECT_CODES.map(d => (
-                    <option key={d.code} value={d.code}>{d.code} - {d.description}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="w-24">
-                <label className={labelClass}>Major</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={defect.majorCount}
-                  onChange={(e) => updateDefect(index, 'majorCount', parseInt(e.target.value) || 0)}
-                  className={inputClass}
-                />
-              </div>
-              <div className="w-24">
-                <label className={labelClass}>Minor</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={defect.minorCount}
-                  onChange={(e) => updateDefect(index, 'minorCount', parseInt(e.target.value) || 0)}
-                  className={inputClass}
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => removeDefect(index)}
-                className="mt-6 p-2 text-red-500 hover:bg-red-50 rounded"
-              >
-                <Trash2 size={18} />
-              </button>
-            </div>
-          ))}
-        </div>
-        <button
-          type="button"
-          onClick={addDefect}
-          className="mt-3 flex items-center gap-2 px-4 py-2 text-emerald-600 border border-emerald-300 rounded-lg hover:bg-emerald-50"
-        >
-          <Plus size={18} />
-          Add Defect
-        </button>
-      </div>
-
-      {/* Legacy Quality Checks */}
-      <div className="bg-white rounded-lg shadow-sm border p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Additional Checks</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <OkNotOkField field="cartonDimension" label="Carton Dimension" />
-          <OkNotOkField field="productLabel" label="Product Label" />
-          <OkNotOkField field="cartonLabel" label="Carton Label" />
-          <OkNotOkField field="barcodeScan" label="Barcode Scan" />
-        </div>
-      </div>
-
       {/* Photos */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Photos</h2>
@@ -1321,6 +1317,58 @@ export function FinalInspectionForm() {
         </div>
       </div>
 
+      {/* Quality Checks */}
+      <div className="bg-white rounded-lg shadow-sm border p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Quality Checks</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {OK_NOT_OK_FIELDS.map(({ key, label }) => {
+            const fieldKey = key as keyof FormDataState;
+            const fieldValue = formData[fieldKey] as OkNotOk;
+            return (
+              <div key={key} className="border border-gray-200 rounded-lg p-3">
+                <label className={labelClass}>{label}</label>
+                <div className="flex gap-3">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name={key}
+                      value="OK"
+                      checked={fieldValue === 'OK'}
+                      onChange={() => {
+                        setFormData({ ...formData, [fieldKey]: 'OK' as OkNotOk });
+                        // Clear photo when changing to OK
+                        handleNotOkPhotoChange(key, null);
+                      }}
+                      className="text-emerald-600"
+                    />
+                    <span className="text-sm text-green-600 font-medium">OK</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name={key}
+                      value="NOT OK"
+                      checked={fieldValue === 'NOT OK'}
+                      onChange={() => setFormData({ ...formData, [fieldKey]: 'NOT OK' as OkNotOk })}
+                      className="text-red-600"
+                    />
+                    <span className="text-sm text-red-600 font-medium">NOT OK</span>
+                  </label>
+                </div>
+                <NotOkPhotoUpload
+                  fieldKey={key}
+                  fieldLabel={label}
+                  isNotOk={fieldValue === 'NOT OK'}
+                  photo={notOkPhotos[key] || null}
+                  preview={notOkPreviews[key] || ''}
+                  onPhotoChange={(file) => handleNotOkPhotoChange(key, file)}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Remarks & Result */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Final Result</h2>
@@ -1348,7 +1396,7 @@ export function FinalInspectionForm() {
                   name="inspectionResult"
                   value="PASS"
                   checked={formData.inspectionResult === 'PASS'}
-                  onChange={(e) => setFormData({ ...formData, inspectionResult: e.target.value })}
+                  onChange={() => setFormData({ ...formData, inspectionResult: 'PASS' as const })}
                   className="hidden"
                 />
                 <CheckCircle2 className={`w-6 h-6 ${formData.inspectionResult === 'PASS' ? 'text-green-600' : 'text-gray-400'}`} />
@@ -1366,7 +1414,7 @@ export function FinalInspectionForm() {
                   name="inspectionResult"
                   value="FAIL"
                   checked={formData.inspectionResult === 'FAIL'}
-                  onChange={(e) => setFormData({ ...formData, inspectionResult: e.target.value })}
+                  onChange={() => setFormData({ ...formData, inspectionResult: 'FAIL' as const })}
                   className="hidden"
                 />
                 <XCircle className={`w-6 h-6 ${formData.inspectionResult === 'FAIL' ? 'text-red-600' : 'text-gray-400'}`} />
