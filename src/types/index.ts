@@ -38,6 +38,7 @@ export const CUSTOM_OPTIONS_KEYS = {
   buyerDesigns: 'em_custom_buyer_designs',
   customSizesCm: 'em_custom_sizes_cm',
   customSizesFeet: 'em_custom_sizes_feet',
+  aqlLevels: 'em_custom_aql_levels',
 } as const;
 
 // Standard product sizes in cm

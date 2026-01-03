@@ -467,6 +467,7 @@ export function FinalInspectionForm() {
   const [customBuyerDesigns, setCustomBuyerDesigns] = useState<string[]>([]);
   const [customSizesCm, setCustomSizesCm] = useState<string[]>([]);
   const [customSizesFeet, setCustomSizesFeet] = useState<string[]>([]);
+  const [customAqlLevels, setCustomAqlLevels] = useState<string[]>([]);
   const [sizeUnit, setSizeUnit] = useState<SizeUnit>('cm');
   const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
 
@@ -496,6 +497,7 @@ export function FinalInspectionForm() {
     setCustomBuyerDesigns(getCustomOptions(CUSTOM_OPTIONS_KEYS.buyerDesigns));
     setCustomSizesCm(getCustomOptions(CUSTOM_OPTIONS_KEYS.customSizesCm));
     setCustomSizesFeet(getCustomOptions(CUSTOM_OPTIONS_KEYS.customSizesFeet));
+    setCustomAqlLevels(getCustomOptions(CUSTOM_OPTIONS_KEYS.aqlLevels));
   }, []);
 
   // Update formData.productSizes when selectedSizes changes
@@ -537,6 +539,12 @@ export function FinalInspectionForm() {
     if (!selectedSizes.includes(value)) {
       setSelectedSizes(prev => [...prev, value]);
     }
+  };
+
+  const addCustomAqlLevel = (value: string) => {
+    const updated = [...customAqlLevels, value];
+    setCustomAqlLevels(updated);
+    saveCustomOptions(CUSTOM_OPTIONS_KEYS.aqlLevels, updated);
   };
 
   const toggleSize = (size: string) => {
@@ -1195,19 +1203,16 @@ export function FinalInspectionForm() {
               className={inputClass}
             />
           </div>
-          <div>
-            <label className={labelClass}>AQL *</label>
-            <select
-              required
-              value={formData.aql}
-              onChange={(e) => setFormData({ ...formData, aql: e.target.value })}
-              className={inputClass}
-            >
-              {AQL_LEVELS.map(level => (
-                <option key={level} value={level}>{level}</option>
-              ))}
-            </select>
-          </div>
+          <DropdownWithAdd
+            label="AQL"
+            value={formData.aql}
+            onChange={(value) => setFormData({ ...formData, aql: value })}
+            options={AQL_LEVELS}
+            customOptions={customAqlLevels}
+            onAddCustom={addCustomAqlLevel}
+            required
+            placeholder="Select AQL..."
+          />
           <div>
             <label className={labelClass}>Sample Size *</label>
             <input
