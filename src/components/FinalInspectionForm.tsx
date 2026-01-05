@@ -20,7 +20,19 @@ import {
   STANDARD_SIZES_CM,
   STANDARD_SIZES_FEET
 } from '../types';
-import { Loader2, Upload, X, Camera, CheckCircle2, XCircle, Plus } from 'lucide-react';
+import { Loader2, Upload, X, Camera, CheckCircle2, XCircle, Plus, Save } from 'lucide-react';
+
+// Draft storage key
+const DRAFT_STORAGE_KEY = 'finalInspectionDraft';
+
+// Draft interface
+interface DraftData {
+  formData: FormDataState;
+  defects: Defect[];
+  selectedSizes: string[];
+  sizeUnit: SizeUnit;
+  savedAt: string;
+}
 
 // Helper to get custom options from localStorage
 const getCustomOptions = (key: string): string[] => {
@@ -456,6 +468,10 @@ const initialFormData: FormDataState = {
 export function FinalInspectionForm() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [draftSaving, setDraftSaving] = useState(false);
+  const [draftSaved, setDraftSaved] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
 
   const [formData, setFormData] = useState<FormDataState>(initialFormData);
 
@@ -489,6 +505,73 @@ export function FinalInspectionForm() {
     }
     loadCustomers();
   }, []);
+
+  // Load draft from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedDraft = localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (savedDraft) {
+        const draft: DraftData = JSON.parse(savedDraft);
+        setFormData(draft.formData);
+        setDefects(draft.defects);
+        setSelectedSizes(draft.selectedSizes);
+        setSizeUnit(draft.sizeUnit);
+        setLastSavedAt(draft.savedAt);
+        setDraftRestored(true);
+        // Hide the notification after 5 seconds
+        setTimeout(() => setDraftRestored(false), 5000);
+        console.log('Draft restored from', draft.savedAt);
+      }
+    } catch (error) {
+      console.error('Error loading draft:', error);
+    }
+  }, []);
+
+  // Save draft function
+  const saveDraft = () => {
+    try {
+      setDraftSaving(true);
+      const now = new Date().toLocaleString();
+      const draft: DraftData = {
+        formData,
+        defects,
+        selectedSizes,
+        sizeUnit,
+        savedAt: now
+      };
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      setLastSavedAt(now);
+      setDraftSaved(true);
+      setTimeout(() => setDraftSaved(false), 2000);
+      console.log('Draft saved at', now);
+    } catch (error) {
+      console.error('Error saving draft:', error);
+    } finally {
+      setDraftSaving(false);
+    }
+  };
+
+  // Clear draft function
+  const clearDraft = () => {
+    try {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      setLastSavedAt(null);
+    } catch (error) {
+      console.error('Error clearing draft:', error);
+    }
+  };
+
+  // Auto-save draft every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Only auto-save if there's meaningful data
+      if (formData.customerName || formData.opsNo || formData.buyerDesignName) {
+        saveDraft();
+      }
+    }, 30000); // 30 seconds
+
+    return () => clearInterval(interval);
+  }, [formData, defects, selectedSizes, sizeUnit]);
 
   // Load custom options from localStorage on mount
   useEffect(() => {
@@ -909,12 +992,15 @@ export function FinalInspectionForm() {
       }
 
       setSuccess(true);
+      // Clear draft after successful submission
+      clearDraft();
       // Reset form
       setFormData({
         ...initialFormData,
         inspectionDate: new Date().toISOString().split('T')[0]
       });
       setDefects([]);
+      setSelectedSizes([]);
       setNotOkPhotos({});
       setNotOkPreviews({});
       setSizeUnit('cm');
@@ -964,6 +1050,22 @@ export function FinalInspectionForm() {
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-center gap-3">
           <CheckCircle2 className="text-emerald-600 w-5 h-5" />
           <span className="text-emerald-700">Inspection submitted successfully!</span>
+        </div>
+      )}
+
+      {draftRestored && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Save className="text-blue-600 w-5 h-5" />
+            <span className="text-blue-700">Draft restored from {lastSavedAt}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDraftRestored(false)}
+            className="text-blue-400 hover:text-blue-600"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
@@ -1432,21 +1534,59 @@ export function FinalInspectionForm() {
         </div>
       </div>
 
-      {/* Submit */}
-      <button
-        type="submit"
-        disabled={loading}
-        className="w-full py-4 bg-emerald-600 text-white font-semibold rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-      >
-        {loading ? (
-          <>
-            <Loader2 className="w-5 h-5 animate-spin" />
-            Submitting...
-          </>
-        ) : (
-          'Submit Inspection Report'
-        )}
-      </button>
+      {/* Draft Status & Actions */}
+      <div className="bg-white rounded-lg shadow-sm border p-4">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="text-sm text-gray-500">
+            {lastSavedAt && (
+              <span className="flex items-center gap-2">
+                <Save className="w-4 h-4" />
+                Draft saved: {lastSavedAt}
+              </span>
+            )}
+            {draftSaved && (
+              <span className="text-emerald-600 font-medium ml-2">Saved!</span>
+            )}
+          </div>
+          <div className="flex gap-3 w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={saveDraft}
+              disabled={draftSaving}
+              className="flex-1 sm:flex-none px-6 py-3 border-2 border-emerald-600 text-emerald-600 font-semibold rounded-lg hover:bg-emerald-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {draftSaving ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="w-5 h-5" />
+                  Save Draft
+                </>
+              )}
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 sm:flex-none px-6 py-3 bg-emerald-600 text-white font-semibold rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Submitting...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-5 h-5" />
+                  Submit Report
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
     </form>
   );
 }
