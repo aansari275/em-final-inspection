@@ -805,6 +805,7 @@ export function FinalInspectionForm() {
         customerCode: formData.customerCode,
         customerPoNo: formData.customerPoNo,
         opsNo: formData.opsNo,
+        opsNumber: formData.opsNo,  // Standardized OPS reference for cross-app queries
         buyerDesignName: formData.buyerDesignName,
         emplDesignNo: formData.emplDesignNo,
         colorName: formData.colorName,

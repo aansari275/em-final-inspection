@@ -105,6 +105,7 @@ export interface FinalInspection {
   customerCode: string;
   customerPoNo: string;
   opsNo: string;
+  opsNumber?: string;  // Standardized OPS reference for cross-app queries (dual-write)
   buyerDesignName: string;
   emplDesignNo: string;
   colorName: string;
