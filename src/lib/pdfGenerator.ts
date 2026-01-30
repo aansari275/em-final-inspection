@@ -244,6 +244,51 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
   addRow([['Total Order Qty', inspection.totalOrderQty], ['Inspected Lot Qty', inspection.inspectedLotQty]]);
   addRow([['AQL', inspection.aql], ['Sample Size', inspection.sampleSize]]);
 
+  // AQL Z1.4-2008 Calculation Details (if available)
+  if (inspection.codeLetter || inspection.acceptNumber !== undefined) {
+    checkNewPage();
+    doc.setFillColor(243, 248, 243); // Light green background
+    doc.rect(15, y - 2, pageWidth - 30, 20, 'F');
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...primaryColor);
+    doc.text('AQL Z1.4-2008 (Level II)', 18, y + 2);
+
+    const aqlColW = (pageWidth - 36) / 4;
+    doc.setFontSize(7);
+    doc.setTextColor(...lightGray);
+    doc.text('Code Letter', 18, y + 7);
+    doc.text('Sample Size', 18 + aqlColW, y + 7);
+    doc.text('Accept ≤', 18 + aqlColW * 2, y + 7);
+    doc.text('Reject ≥', 18 + aqlColW * 3, y + 7);
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...darkGray);
+    const effectiveCode = inspection.effectiveCodeLetter || inspection.codeLetter || '-';
+    doc.text(effectiveCode, 18, y + 13);
+    doc.text(String(inspection.calculatedSampleSize || inspection.sampleSize), 18 + aqlColW, y + 13);
+    doc.setTextColor(...successGreen);
+    doc.text(String(inspection.acceptNumber ?? '-'), 18 + aqlColW * 2, y + 13);
+    doc.setTextColor(...errorRed);
+    doc.text(String(inspection.rejectNumber ?? '-'), 18 + aqlColW * 3, y + 13);
+    y += 22;
+
+    // Show if result was auto-determined or overridden
+    if (inspection.isAutoResult !== undefined) {
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'italic');
+      doc.setTextColor(...lightGray);
+      const resultNote = inspection.resultOverridden
+        ? 'Result: Inspector override'
+        : inspection.isAutoResult
+          ? 'Result: Auto-determined per Z1.4-2008'
+          : 'Result: Manually entered';
+      doc.text(resultNote, 18, y);
+      y += 6;
+    }
+  }
+
   // Accepted/Rejected with colored values
   checkNewPage();
   doc.setFont('helvetica', 'bold');
@@ -529,7 +574,6 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
 
   // Add all photos
   await addImagePage(inspection.approvedSamplePhoto, 'Approved Sample');
-  await addImagePage(inspection.idPhoto, 'ID Photo');
   // Red Seal Photos
   await addImagePage(inspection.redSealFrontPhoto, 'Red Seal - Front');
   await addImagePage(inspection.redSealBackPhoto, 'Red Seal - Back');
@@ -556,6 +600,25 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
   if (inspection.unitLoadEnabled && inspection.unitLoadPhotos && inspection.unitLoadPhotos.length > 0) {
     for (const photo of inspection.unitLoadPhotos) {
       await addImagePage(photo.url, `Unit Load - ${photo.label}`);
+    }
+  }
+
+  // Construction photos
+  if (inspection.constructionPhotos) {
+    if (inspection.constructionPhotos.warpPer10cm) {
+      await addImagePage(inspection.constructionPhotos.warpPer10cm, 'Construction - Warp per 10 cms');
+    }
+    if (inspection.constructionPhotos.weftPer10cm) {
+      await addImagePage(inspection.constructionPhotos.weftPer10cm, 'Construction - Weft per 10 cms');
+    }
+    if (inspection.constructionPhotos.pileHeightPhoto) {
+      await addImagePage(inspection.constructionPhotos.pileHeightPhoto, 'Construction - Pile Height');
+    }
+    if (inspection.constructionPhotos.productNetWeightPhoto) {
+      await addImagePage(inspection.constructionPhotos.productNetWeightPhoto, 'Construction - Product Net Weight');
+    }
+    if (inspection.constructionPhotos.productGrossWeightPhoto) {
+      await addImagePage(inspection.constructionPhotos.productGrossWeightPhoto, 'Construction - Product Gross Weight');
     }
   }
 

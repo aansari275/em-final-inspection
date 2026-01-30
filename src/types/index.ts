@@ -214,7 +214,6 @@ export interface FinalInspection {
 
   // Photos
   approvedSamplePhoto: string;
-  idPhoto: string;
   redSealFrontPhoto: string;
   redSealBackPhoto: string;
   redSealCloseUpPhoto: string;
@@ -234,6 +233,15 @@ export interface FinalInspection {
   unitLoadEnabled?: boolean;
   unitLoadPhotos?: Array<{ label: string; url: string }>;
 
+  // Construction photos
+  constructionPhotos?: {
+    warpPer10cm?: string;
+    weftPer10cm?: string;
+    pileHeightPhoto?: string;
+    productNetWeightPhoto?: string;
+    productGrossWeightPhoto?: string;
+  };
+
   // Inspected articles from OPS (selected during form entry)
   inspectedArticles?: Array<{
     articleName: string;
@@ -250,6 +258,16 @@ export interface FinalInspection {
 
   // Size unit used
   sizeUnit: SizeUnit;
+
+  // AQL Z1.4-2008 Calculation Fields
+  inspectionLevel?: 'I' | 'II' | 'III';  // Default: 'II' (General Level II)
+  codeLetter?: string;                    // Auto-calculated code letter (A-R)
+  calculatedSampleSize?: number;          // Sample size from Z1.4 table
+  acceptNumber?: number;                  // Accept threshold from table
+  rejectNumber?: number;                  // Reject threshold from table
+  effectiveCodeLetter?: string;           // May differ if arrow applies
+  isAutoResult?: boolean;                 // Was PASS/FAIL auto-determined?
+  resultOverridden?: boolean;             // Did inspector override auto result?
 
   qcInspectorRemarks: string;
   inspectionResult: 'PASS' | 'FAIL';
@@ -326,7 +344,6 @@ export const DEFECT_CODES = [
 
 export const PHOTO_TYPES = [
   { key: 'approvedSamplePhoto', label: 'Approved Sample Photo' },
-  { key: 'idPhoto', label: 'ID Photo' },
   // Red Seal Photos section
   { key: 'redSealFrontPhoto', label: 'Red Seal - Front' },
   { key: 'redSealBackPhoto', label: 'Red Seal - Back' },
@@ -340,4 +357,13 @@ export const PHOTO_TYPES = [
   { key: 'sizeSidePhoto', label: 'Size Side Photo' },
   { key: 'inspectedSamplesPhoto', label: 'Inspected Samples Photo' },
   { key: 'metalCheckingPhoto', label: 'Metal Checking Photo' },
+] as const;
+
+// Construction photo types with measurements
+export const CONSTRUCTION_PHOTO_TYPES = [
+  { key: 'warpPer10cm', label: 'Warp per 10 cms' },
+  { key: 'weftPer10cm', label: 'Weft per 10 cms' },
+  { key: 'pileHeightPhoto', label: 'Pile Height' },
+  { key: 'productNetWeightPhoto', label: 'Product Net Weight' },
+  { key: 'productGrossWeightPhoto', label: 'Product Gross Weight' },
 ] as const;

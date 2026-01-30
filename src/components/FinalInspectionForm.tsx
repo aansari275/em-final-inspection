@@ -4,12 +4,14 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage, getCustomers, addCustomer, getDesignNames, addDesignName, DesignName, getOpsByNumber, getOpsList, OpsOrder, OpsOrderItem } from '../lib/firebase';
 import { emailSettingsService } from '../lib/emailSettingsService';
 import { generateFinalInspectionPDF } from '../lib/pdfGenerator';
+import { calculateAql, wouldPass, AqlCalculationResult } from '../lib/aqlCalculator';
 import {
   FinalInspection,
   QC_INSPECTORS,
   MERCHANTS,
   AQL_LEVELS,
   PHOTO_TYPES,
+  CONSTRUCTION_PHOTO_TYPES,
   OkNotOk,
   Defect,
   NotOkPhoto,
@@ -24,7 +26,7 @@ import {
   UNIT_LOAD_LABELS,
   SelectedArticle
 } from '../types';
-import { Loader2, Upload, X, Camera, CheckCircle2, XCircle, Plus, Save, Search, Package, AlertCircle, ChevronDown } from 'lucide-react';
+import { Loader2, Upload, X, Camera, CheckCircle2, XCircle, Plus, Save, Search, Package, AlertCircle, ChevronDown, Calculator, Info } from 'lucide-react';
 
 // Draft storage key
 const DRAFT_STORAGE_KEY = 'finalInspectionDraft';
@@ -321,10 +323,11 @@ function NotOkPhotoUpload({ fieldLabel, isNotOk, preview, onPhotoChange }: NotOk
       ) : (
         <label className="inline-flex items-center gap-2 px-3 py-1.5 text-sm border border-red-300 text-red-600 rounded-lg cursor-pointer hover:bg-red-50">
           <Camera size={16} />
-          <span>Add Photo</span>
+          <span>Take/Upload Photo</span>
           <input
             type="file"
             accept="image/*"
+            capture="environment"
             className="hidden"
             onChange={(e) => onPhotoChange(e.target.files?.[0] || null)}
           />
@@ -335,11 +338,13 @@ function NotOkPhotoUpload({ fieldLabel, isNotOk, preview, onPhotoChange }: NotOk
 }
 
 type PhotoKey = keyof Pick<FinalInspection,
-  'approvedSamplePhoto' | 'idPhoto' | 'redSealFrontPhoto' | 'redSealBackPhoto' |
+  'approvedSamplePhoto' | 'redSealFrontPhoto' | 'redSealBackPhoto' |
   'redSealCloseUpPhoto' | 'redSealProductFront' | 'redSealProductBack' |
   'labelPhoto' | 'moisturePhoto' | 'sizeFrontPhoto' | 'sizeSidePhoto' |
   'inspectedSamplesPhoto' | 'metalCheckingPhoto'
 >;
+
+type ConstructionPhotoKey = 'warpPer10cm' | 'weftPer10cm' | 'pileHeightPhoto' | 'productNetWeightPhoto' | 'productGrossWeightPhoto';
 
 // Form state type with proper union types
 interface FormDataState {
@@ -513,6 +518,11 @@ export function FinalInspectionForm() {
   const [showOpsDropdown, setShowOpsDropdown] = useState(false);
   const opsDropdownRef = useRef<HTMLDivElement>(null);
 
+  // AQL Z1.4-2008 Calculation State
+  const [aqlCalculation, setAqlCalculation] = useState<AqlCalculationResult | null>(null);
+  const [isAutoResult, setIsAutoResult] = useState(false);
+  const [resultOverridden, setResultOverridden] = useState(false);
+
   // Load customers from Firestore on mount
   useEffect(() => {
     async function loadCustomers() {
@@ -653,6 +663,59 @@ export function FinalInspectionForm() {
     const sizesString = selectedSizes.join(', ');
     setFormData(prev => ({ ...prev, productSizes: sizesString }));
   }, [selectedSizes]);
+
+  // AQL Z1.4-2008 Auto-Calculation
+  useEffect(() => {
+    const lotSize = parseInt(formData.inspectedLotQty, 10);
+    const aql = formData.aql;
+
+    if (!isNaN(lotSize) && lotSize >= 2 && aql) {
+      const result = calculateAql(lotSize, aql, 'II');
+      setAqlCalculation(result);
+
+      if (result.isValid) {
+        // Auto-fill sample size
+        setFormData(prev => ({
+          ...prev,
+          sampleSize: String(result.sampleSize)
+        }));
+      }
+    } else {
+      setAqlCalculation(null);
+    }
+  }, [formData.inspectedLotQty, formData.aql]);
+
+  // Auto-determine PASS/FAIL based on rejected qty and AQL calculation
+  useEffect(() => {
+    if (!aqlCalculation?.isValid || resultOverridden) return;
+
+    const rejectedQty = parseInt(formData.rejectedQty, 10);
+    if (isNaN(rejectedQty)) return;
+
+    const passFailResult = wouldPass(rejectedQty, aqlCalculation.acceptNumber, aqlCalculation.rejectNumber);
+
+    if (passFailResult.result !== formData.inspectionResult) {
+      setFormData(prev => ({
+        ...prev,
+        inspectionResult: passFailResult.result
+      }));
+      setIsAutoResult(true);
+    }
+  }, [formData.rejectedQty, aqlCalculation, resultOverridden]);
+
+  // Reset auto-result flag when user manually changes result
+  const handleResultChange = (newResult: 'PASS' | 'FAIL') => {
+    const autoResult = aqlCalculation?.isValid && formData.rejectedQty
+      ? wouldPass(parseInt(formData.rejectedQty, 10), aqlCalculation.acceptNumber, aqlCalculation.rejectNumber).result
+      : null;
+
+    if (autoResult && newResult !== autoResult) {
+      setResultOverridden(true);
+    } else {
+      setResultOverridden(false);
+    }
+    setFormData(prev => ({ ...prev, inspectionResult: newResult }));
+  };
 
   // Handlers to add and save custom options
   const addCustomQcInspector = (value: string) => {
@@ -964,7 +1027,6 @@ export function FinalInspectionForm() {
 
   const [photos, setPhotos] = useState<Record<PhotoKey, File | null>>({
     approvedSamplePhoto: null,
-    idPhoto: null,
     redSealFrontPhoto: null,
     redSealBackPhoto: null,
     redSealCloseUpPhoto: null,
@@ -980,7 +1042,6 @@ export function FinalInspectionForm() {
 
   const [photoPreviews, setPhotoPreviews] = useState<Record<PhotoKey, string>>({
     approvedSamplePhoto: '',
-    idPhoto: '',
     redSealFrontPhoto: '',
     redSealBackPhoto: '',
     redSealCloseUpPhoto: '',
@@ -992,6 +1053,23 @@ export function FinalInspectionForm() {
     sizeSidePhoto: '',
     inspectedSamplesPhoto: '',
     metalCheckingPhoto: '',
+  });
+
+  // Construction photos state
+  const [constructionPhotos, setConstructionPhotos] = useState<Record<ConstructionPhotoKey, File | null>>({
+    warpPer10cm: null,
+    weftPer10cm: null,
+    pileHeightPhoto: null,
+    productNetWeightPhoto: null,
+    productGrossWeightPhoto: null,
+  });
+
+  const [constructionPreviews, setConstructionPreviews] = useState<Record<ConstructionPhotoKey, string>>({
+    warpPer10cm: '',
+    weftPer10cm: '',
+    pileHeightPhoto: '',
+    productNetWeightPhoto: '',
+    productGrossWeightPhoto: '',
   });
 
   // New Images section state
@@ -1016,6 +1094,19 @@ export function FinalInspectionForm() {
       reader.readAsDataURL(file);
     } else {
       setPhotoPreviews(prev => ({ ...prev, [key]: '' }));
+    }
+  };
+
+  const handleConstructionPhotoChange = (key: ConstructionPhotoKey, file: File | null) => {
+    setConstructionPhotos(prev => ({ ...prev, [key]: file }));
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setConstructionPreviews(prev => ({ ...prev, [key]: e.target?.result as string }));
+      };
+      reader.readAsDataURL(file);
+    } else {
+      setConstructionPreviews(prev => ({ ...prev, [key]: '' }));
     }
   };
 
@@ -1125,6 +1216,20 @@ export function FinalInspectionForm() {
         }
       }
 
+      // Upload construction photos
+      const constructionPhotoUrls: Record<string, string> = {};
+      for (const photoType of CONSTRUCTION_PHOTO_TYPES) {
+        const key = photoType.key as ConstructionPhotoKey;
+        const file = constructionPhotos[key];
+        if (file) {
+          const url = await uploadPhoto(
+            file,
+            `final-inspection-images/${timestamp}_construction_${key}_${file.name}`
+          );
+          constructionPhotoUrls[key] = url;
+        }
+      }
+
       const inspection: FinalInspection = {
         // Company & Document
         company: formData.company,
@@ -1197,7 +1302,6 @@ export function FinalInspectionForm() {
         defects: defects,
         // Photos
         approvedSamplePhoto: photoUrls.approvedSamplePhoto || '',
-        idPhoto: photoUrls.idPhoto || '',
         redSealFrontPhoto: photoUrls.redSealFrontPhoto || '',
         redSealBackPhoto: photoUrls.redSealBackPhoto || '',
         redSealCloseUpPhoto: photoUrls.redSealCloseUpPhoto || '',
@@ -1215,6 +1319,14 @@ export function FinalInspectionForm() {
         consumerPieces: consumerPiecesUrls,
         unitLoadEnabled: unitLoadEnabled,
         unitLoadPhotos: unitLoadPhotoUrls,
+        // Construction photos
+        constructionPhotos: {
+          warpPer10cm: constructionPhotoUrls.warpPer10cm || '',
+          weftPer10cm: constructionPhotoUrls.weftPer10cm || '',
+          pileHeightPhoto: constructionPhotoUrls.pileHeightPhoto || '',
+          productNetWeightPhoto: constructionPhotoUrls.productNetWeightPhoto || '',
+          productGrossWeightPhoto: constructionPhotoUrls.productGrossWeightPhoto || '',
+        },
         // Inspected articles from OPS
         inspectedArticles: selectedArticles
           .filter(a => a.selected)
@@ -1231,6 +1343,15 @@ export function FinalInspectionForm() {
         notOkPhotos: notOkPhotoUrls,
         // Size unit
         sizeUnit: sizeUnit,
+        // AQL Z1.4-2008 Calculation Fields
+        inspectionLevel: 'II',
+        codeLetter: aqlCalculation?.codeLetter || undefined,
+        calculatedSampleSize: aqlCalculation?.sampleSize || undefined,
+        acceptNumber: aqlCalculation?.acceptNumber || undefined,
+        rejectNumber: aqlCalculation?.rejectNumber || undefined,
+        effectiveCodeLetter: aqlCalculation?.effectiveCodeLetter || undefined,
+        isAutoResult: isAutoResult,
+        resultOverridden: resultOverridden,
         // Results
         qcInspectorRemarks: formData.qcInspectorRemarks,
         inspectionResult: formData.inspectionResult,
@@ -1247,7 +1368,6 @@ export function FinalInspectionForm() {
 
         const allPhotos = [
           { url: inspection.approvedSamplePhoto, label: 'Approved Sample' },
-          { url: inspection.idPhoto, label: 'ID Photo' },
           { url: inspection.redSealFrontPhoto, label: 'Red Seal - Front' },
           { url: inspection.redSealBackPhoto, label: 'Red Seal - Back' },
           { url: inspection.redSealCloseUpPhoto, label: 'Close-up with Red Seal' },
@@ -1262,6 +1382,12 @@ export function FinalInspectionForm() {
           ...(inspection.stackedGoodsPhoto ? [{ url: inspection.stackedGoodsPhoto, label: 'Stacked Goods' }] : []),
           ...(inspection.consumerPieces || []).map(p => ({ url: p.url, label: p.label })),
           ...(inspection.unitLoadPhotos || []).map(p => ({ url: p.url, label: p.label })),
+          // Construction photos
+          ...(inspection.constructionPhotos?.warpPer10cm ? [{ url: inspection.constructionPhotos.warpPer10cm, label: 'Warp per 10 cms' }] : []),
+          ...(inspection.constructionPhotos?.weftPer10cm ? [{ url: inspection.constructionPhotos.weftPer10cm, label: 'Weft per 10 cms' }] : []),
+          ...(inspection.constructionPhotos?.pileHeightPhoto ? [{ url: inspection.constructionPhotos.pileHeightPhoto, label: 'Pile Height' }] : []),
+          ...(inspection.constructionPhotos?.productNetWeightPhoto ? [{ url: inspection.constructionPhotos.productNetWeightPhoto, label: 'Product Net Weight' }] : []),
+          ...(inspection.constructionPhotos?.productGrossWeightPhoto ? [{ url: inspection.constructionPhotos.productGrossWeightPhoto, label: 'Product Gross Weight' }] : []),
           ...inspection.otherPhotos.map((url, i) => ({ url, label: `Other ${i + 1}` }))
         ].filter(p => p.url);
 
@@ -1333,6 +1459,17 @@ export function FinalInspectionForm() {
                 <tr><td style="padding: 8px 0; color: #6b7280;">Total Order Qty:</td><td style="padding: 8px 0;">${inspection.totalOrderQty}</td></tr>
                 <tr><td style="padding: 8px 0; color: #6b7280;">Inspected Lot:</td><td style="padding: 8px 0;">${inspection.inspectedLotQty}</td></tr>
                 <tr><td style="padding: 8px 0; color: #6b7280;">AQL / Sample Size:</td><td style="padding: 8px 0;">${inspection.aql} / ${inspection.sampleSize}</td></tr>
+                ${inspection.codeLetter ? `
+                <tr>
+                  <td style="padding: 8px 0; color: #6b7280;">AQL Z1.4-2008:</td>
+                  <td style="padding: 8px 0;">
+                    Code: <strong>${inspection.effectiveCodeLetter || inspection.codeLetter}</strong> |
+                    Accept ≤ <span style="color: #22c55e; font-weight: bold;">${inspection.acceptNumber}</span> |
+                    Reject ≥ <span style="color: #ef4444; font-weight: bold;">${inspection.rejectNumber}</span>
+                    ${inspection.resultOverridden ? ' <em style="color: #d97706;">(Override)</em>' : ''}
+                  </td>
+                </tr>
+                ` : ''}
                 <tr><td style="padding: 8px 0; color: #6b7280;">Accepted:</td><td style="padding: 8px 0; color: #22c55e; font-weight: bold;">${inspection.acceptedQty}</td></tr>
                 <tr><td style="padding: 8px 0; color: #6b7280;">Rejected:</td><td style="padding: 8px 0; color: #ef4444; font-weight: bold;">${inspection.rejectedQty}</td></tr>
               </table>
@@ -1395,7 +1532,6 @@ export function FinalInspectionForm() {
       setSizeUnit('cm');
       setPhotos({
         approvedSamplePhoto: null,
-        idPhoto: null,
         redSealFrontPhoto: null,
         redSealBackPhoto: null,
         redSealCloseUpPhoto: null,
@@ -1410,7 +1546,6 @@ export function FinalInspectionForm() {
       });
       setPhotoPreviews({
         approvedSamplePhoto: '',
-        idPhoto: '',
         redSealFrontPhoto: '',
         redSealBackPhoto: '',
         redSealCloseUpPhoto: '',
@@ -1422,6 +1557,21 @@ export function FinalInspectionForm() {
         sizeSidePhoto: '',
         inspectedSamplesPhoto: '',
         metalCheckingPhoto: '',
+      });
+      // Reset construction photos
+      setConstructionPhotos({
+        warpPer10cm: null,
+        weftPer10cm: null,
+        pileHeightPhoto: null,
+        productNetWeightPhoto: null,
+        productGrossWeightPhoto: null,
+      });
+      setConstructionPreviews({
+        warpPer10cm: '',
+        weftPer10cm: '',
+        pileHeightPhoto: '',
+        productNetWeightPhoto: '',
+        productGrossWeightPhoto: '',
       });
       setOtherPhotos([]);
       setOtherPreviews([]);
@@ -2136,10 +2286,12 @@ export function FinalInspectionForm() {
           ) : (
             <label className="flex flex-col items-center justify-center w-full max-w-xs h-40 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
               <Camera className="w-10 h-10 text-gray-400" />
-              <span className="text-sm text-gray-500 mt-2">Upload Photo</span>
+              <span className="text-sm text-gray-500 mt-2">Take Photo</span>
+              <span className="text-xs text-gray-400">or Upload</span>
               <input
                 type="file"
                 accept="image/*"
+                capture="environment"
                 className="hidden"
                 onChange={(e) => handleStackedGoodsChange(e.target.files?.[0] || null)}
               />
@@ -2201,10 +2353,11 @@ export function FinalInspectionForm() {
                 ) : (
                   <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
                     <Camera className="w-6 h-6 text-gray-400" />
-                    <span className="text-xs text-gray-500 mt-1">Upload</span>
+                    <span className="text-xs text-gray-500 mt-1">Take/Upload</span>
                     <input
                       type="file"
                       accept="image/*"
+                      capture="environment"
                       className="hidden"
                       onChange={(e) => handleConsumerPiecePhoto(index, e.target.files?.[0] || null)}
                     />
@@ -2299,10 +2452,11 @@ export function FinalInspectionForm() {
                     ) : (
                       <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
                         <Camera className="w-6 h-6 text-gray-400" />
-                        <span className="text-xs text-gray-500 mt-1">Upload</span>
+                        <span className="text-xs text-gray-500 mt-1">Take/Upload</span>
                         <input
                           type="file"
                           accept="image/*"
+                          capture="environment"
                           className="hidden"
                           onChange={(e) => handleUnitLoadPhotoChange(index, e.target.files?.[0] || null)}
                         />
@@ -2330,6 +2484,53 @@ export function FinalInspectionForm() {
               </div>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Construction Photos Section */}
+      <div className="bg-white rounded-lg shadow-sm border p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <Camera className="w-5 h-5" />
+          Construction Photos
+        </h2>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          {CONSTRUCTION_PHOTO_TYPES.map(({ key, label }) => (
+            <div key={key}>
+              <label className={labelClass}>
+                {label}
+                {key === 'pileHeightPhoto' && <span className="text-gray-400 text-xs ml-1">(Optional)</span>}
+              </label>
+              {constructionPreviews[key as ConstructionPhotoKey] ? (
+                <div className="relative">
+                  <img
+                    src={constructionPreviews[key as ConstructionPhotoKey]}
+                    alt={label}
+                    className="w-full h-32 object-cover rounded-lg"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleConstructionPhotoChange(key as ConstructionPhotoKey, null)}
+                    className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
+                  <Camera className="w-8 h-8 text-gray-400" />
+                  <span className="text-xs text-gray-500 mt-1">Take Photo</span>
+                  <span className="text-xs text-gray-400">or Upload</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={(e) => handleConstructionPhotoChange(key as ConstructionPhotoKey, e.target.files?.[0] || null)}
+                  />
+                </label>
+              )}
+            </div>
+          ))}
         </div>
       </div>
 
@@ -2369,15 +2570,64 @@ export function FinalInspectionForm() {
             required
             placeholder="Select AQL..."
           />
+        </div>
+
+        {/* AQL Z1.4-2008 Calculation Panel */}
+        {aqlCalculation && (
+          <div className={`mt-4 p-4 rounded-lg border-2 ${aqlCalculation.isValid ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+            <div className="flex items-center gap-2 mb-3">
+              <Calculator size={18} className={aqlCalculation.isValid ? 'text-emerald-600' : 'text-amber-600'} />
+              <span className="font-semibold text-gray-800">AQL Calculation (Z1.4-2008 Level II)</span>
+              {aqlCalculation.codeLetter !== aqlCalculation.effectiveCodeLetter && aqlCalculation.isValid && (
+                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                  Arrow applied: {aqlCalculation.codeLetter} → {aqlCalculation.effectiveCodeLetter}
+                </span>
+              )}
+            </div>
+
+            {aqlCalculation.isValid ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-white p-3 rounded-lg shadow-sm">
+                  <div className="text-xs text-gray-500 uppercase tracking-wide">Code Letter</div>
+                  <div className="text-xl font-bold text-emerald-700">{aqlCalculation.effectiveCodeLetter}</div>
+                </div>
+                <div className="bg-white p-3 rounded-lg shadow-sm">
+                  <div className="text-xs text-gray-500 uppercase tracking-wide">Sample Size</div>
+                  <div className="text-xl font-bold text-emerald-700">{aqlCalculation.sampleSize}</div>
+                </div>
+                <div className="bg-white p-3 rounded-lg shadow-sm">
+                  <div className="text-xs text-gray-500 uppercase tracking-wide">Accept ≤</div>
+                  <div className="text-xl font-bold text-green-600">{aqlCalculation.acceptNumber}</div>
+                </div>
+                <div className="bg-white p-3 rounded-lg shadow-sm">
+                  <div className="text-xs text-gray-500 uppercase tracking-wide">Reject ≥</div>
+                  <div className="text-xl font-bold text-red-600">{aqlCalculation.rejectNumber}</div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-amber-700">
+                <AlertCircle size={16} />
+                <span>{aqlCalculation.error || 'Unable to calculate AQL values'}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4">
           <div>
-            <label className={labelClass}>Sample Size *</label>
+            <label className={labelClass}>
+              Sample Size *
+              {aqlCalculation?.isValid && (
+                <span className="ml-2 text-xs text-emerald-600 font-normal">(auto-filled)</span>
+              )}
+            </label>
             <input
               type="number"
               required
               min="0"
               value={formData.sampleSize}
               onChange={(e) => setFormData({ ...formData, sampleSize: e.target.value })}
-              className={inputClass}
+              className={`${inputClass} ${aqlCalculation?.isValid && formData.sampleSize === String(aqlCalculation.sampleSize) ? 'bg-emerald-50 border-emerald-300' : ''}`}
             />
           </div>
           <div>
@@ -2403,6 +2653,67 @@ export function FinalInspectionForm() {
             />
           </div>
         </div>
+
+        {/* Auto PASS/FAIL Determination */}
+        {aqlCalculation?.isValid && formData.rejectedQty && (
+          <div className={`mt-4 p-4 rounded-lg border-2 ${
+            formData.inspectionResult === 'PASS'
+              ? 'bg-green-50 border-green-300'
+              : 'bg-red-50 border-red-300'
+          }`}>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div className="flex items-center gap-2">
+                {formData.inspectionResult === 'PASS' ? (
+                  <CheckCircle2 size={20} className="text-green-600" />
+                ) : (
+                  <XCircle size={20} className="text-red-600" />
+                )}
+                <span className="font-semibold">
+                  {isAutoResult && !resultOverridden ? 'Auto-determined: ' : ''}
+                  <span className={formData.inspectionResult === 'PASS' ? 'text-green-700' : 'text-red-700'}>
+                    {formData.inspectionResult}
+                  </span>
+                </span>
+                <span className="text-sm text-gray-600">
+                  ({wouldPass(parseInt(formData.rejectedQty, 10), aqlCalculation.acceptNumber, aqlCalculation.rejectNumber).explanation})
+                </span>
+              </div>
+
+              {resultOverridden && (
+                <div className="flex items-center gap-1 text-amber-600 text-sm">
+                  <Info size={14} />
+                  <span>Inspector override</span>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-500">Override:</span>
+                <button
+                  type="button"
+                  onClick={() => handleResultChange('PASS')}
+                  className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                    formData.inspectionResult === 'PASS'
+                      ? 'bg-green-600 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-green-100'
+                  }`}
+                >
+                  PASS
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleResultChange('FAIL')}
+                  className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                    formData.inspectionResult === 'FAIL'
+                      ? 'bg-red-600 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-red-100'
+                  }`}
+                >
+                  FAIL
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Photos */}
@@ -2430,10 +2741,12 @@ export function FinalInspectionForm() {
               ) : (
                 <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
                   <Camera className="w-8 h-8 text-gray-400" />
-                  <span className="text-xs text-gray-500 mt-1">Upload</span>
+                  <span className="text-xs text-gray-500 mt-1">Take Photo</span>
+                  <span className="text-xs text-gray-400">or Upload</span>
                   <input
                     type="file"
                     accept="image/*"
+                    capture="environment"
                     className="hidden"
                     onChange={(e) => handlePhotoChange(key as PhotoKey, e.target.files?.[0] || null)}
                   />
@@ -2465,11 +2778,12 @@ export function FinalInspectionForm() {
             ))}
           </div>
           <label className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-            <Upload size={18} />
-            <span>Add More Photos</span>
+            <Camera size={18} />
+            <span>Take/Upload Photos</span>
             <input
               type="file"
               accept="image/*"
+              capture="environment"
               multiple
               className="hidden"
               onChange={(e) => handleOtherPhotosChange(e.target.files)}
