@@ -158,7 +158,20 @@ export function InspectionList() {
         })
       });
 
-      const result = await response.json();
+      if (!response.ok) {
+        // Check if running on localhost without Netlify functions
+        if (window.location.hostname === 'localhost') {
+          throw new Error('Email sending requires Netlify. Run "netlify dev" instead of "npm run dev"');
+        }
+        throw new Error(`Server error: ${response.status}`);
+      }
+
+      const text = await response.text();
+      if (!text) {
+        throw new Error('Empty response from server');
+      }
+
+      const result = JSON.parse(text);
       if (result.success) {
         alert('Email sent successfully!');
       } else {

@@ -82,7 +82,7 @@ Main entry point for the form:
 ### 7. Product Quality Checks
 - Approved Sample Available (Yes/No)
 - Material/Fibre Content (dropdown)
-- OK/NOT OK checks with photo capture on NOT OK:
+- OK/NOT OK/NA checks with photo capture on NOT OK:
   - Motif/Design Check, Backing (with notes), Binding & Edges
   - Hand Feel, Embossing/Carving, Workmanship, Product Quality Weight
 - Text fields: Tuft Density, Pile Height, Product Weight, Size Tolerance, Finishing %, Packed %
@@ -144,14 +144,16 @@ All OK/NOT OK checks:
 ### PDF Export
 - Professional formatted PDF with all sections
 - Inspected Articles table (when available)
-- All photos included on separate pages
-- Color-coded OK/NOT OK status
+- **2 photos per page** in grid layout (aspect ratio preserved)
+- Color-coded OK/NOT OK/NA status
+- AQL Z1.4-2008 calculation details included
 
 ### Email Reports
 - HTML email with inspection summary
 - Inspected Articles table
 - Photo attachments
 - PDF attachment
+- **Auto-sends to merchants** linked with buyer code (primary + assistant)
 
 ### Draft System
 - Auto-save every 30 seconds
@@ -177,6 +179,18 @@ Implements ANSI/ASQ Z1.4-2008 standard for acceptance sampling:
 | 200 | 2.5 | G | 32 | 1 | 2 |
 | 500 | 1.5 | H | 50 | 1 | 2 |
 | 5000 | 4.0 | L | 200 | 10 | 11 |
+
+### Inspection List Features
+- **Image thumbnails** displayed in grid (not text links)
+- **Preview modal** with full report and Photos Gallery section
+- **Re-send email** functionality with merchant auto-CC
+- Download PDF directly from list
+
+### Merchant Auto-Email
+When inspection is submitted:
+1. Fetches primary & assistant merchant emails from `buyers` collection
+2. Auto-adds merchant emails to recipient list
+3. Sends inspection report to all recipients (manual + auto-added)
 
 ---
 
@@ -225,10 +239,26 @@ src/
     └── index.ts                 # TypeScript types & constants
 ```
 
+## Local Development
+```bash
+# For basic development (no email)
+npm run dev
+
+# For full functionality including email
+netlify dev
+```
+**Note:** Email functions only work with `netlify dev` or on production.
+
 ## Deployment
 ```bash
 npm run build
 netlify deploy --prod --dir=dist
+```
+
+## Firebase Storage CORS
+CORS configured for image loading in PDFs:
+```bash
+gsutil cors set cors.json gs://easternmillscom.firebasestorage.app
 ```
 
 ## Environment Variables (Netlify)

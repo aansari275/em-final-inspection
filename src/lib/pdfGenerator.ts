@@ -3,8 +3,83 @@ import { FinalInspection, COMPANY_NAMES, OK_NOT_OK_FIELDS } from '../types';
 
 // Convert image URL to base64 data URL to avoid CORS issues
 async function urlToBase64(url: string): Promise<string | null> {
+  if (!url) return null;
+
   try {
-    const response = await fetch(url);
+    // For Firebase Storage URLs, ensure proper format
+    let fetchUrl = url;
+
+    // If URL is from Firebase Storage and doesn't have alt=media, add it
+    if (url.includes('firebasestorage.googleapis.com') && !url.includes('alt=media')) {
+      fetchUrl = url + (url.includes('?') ? '&' : '?') + 'alt=media';
+    }
+
+    // Use Image element approach for better browser compatibility
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous'; // Enable CORS
+
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth || img.width;
+          canvas.height = img.naturalHeight || img.height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            resolve(dataUrl);
+          } else {
+            resolve(null);
+          }
+        } catch (canvasError) {
+          console.error('Canvas error (likely CORS):', canvasError);
+          // Fallback to fetch method
+          fetchImageAsFallback(fetchUrl).then(resolve);
+        }
+      };
+
+      img.onerror = () => {
+        console.error('Image load error, trying fetch fallback:', url);
+        // Fallback to fetch method
+        fetchImageAsFallback(fetchUrl).then(resolve);
+      };
+
+      // Set timeout to prevent hanging
+      setTimeout(() => {
+        if (!img.complete) {
+          console.error('Image load timeout:', url);
+          resolve(null);
+        }
+      }, 15000); // 15 second timeout
+
+      img.src = fetchUrl;
+    });
+  } catch (error) {
+    console.error('Failed to convert image to base64:', error);
+    return null;
+  }
+}
+
+// Fallback fetch method for images
+async function fetchImageAsFallback(url: string): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    const response = await fetch(url, {
+      signal: controller.signal,
+      mode: 'cors',
+      credentials: 'omit'
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      console.error('Fetch failed with status:', response.status);
+      return null;
+    }
+
     const blob = await response.blob();
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -13,7 +88,7 @@ async function urlToBase64(url: string): Promise<string | null> {
       reader.readAsDataURL(blob);
     });
   } catch (error) {
-    console.error('Failed to convert image to base64:', error);
+    console.error('Fetch fallback failed:', error);
     return null;
   }
 }
@@ -505,28 +580,110 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
 
   addFooter();
 
-  // Add images on new pages
-  const addImagePage = async (url: string, title: string) => {
-    if (!url) return;
+  // Collect all photos with labels
+  interface PhotoItem {
+    url: string;
+    label: string;
+    base64?: string | null;
+    width?: number;
+    height?: number;
+  }
 
-    const base64 = await urlToBase64(url);
-    if (!base64) {
-      doc.addPage();
-      doc.setFillColor(...primaryColor);
-      doc.rect(0, 0, pageWidth, 20, 'F');
-      doc.setFontSize(11);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(255, 255, 255);
-      doc.text(title, pageWidth / 2, 13, { align: 'center' });
+  const allPhotos: PhotoItem[] = [];
 
-      doc.setTextColor(...lightGray);
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-      doc.text('Image could not be loaded', pageWidth / 2, 100, { align: 'center' });
-      addFooter();
-      return;
+  // Standard photos
+  if (inspection.approvedSamplePhoto) allPhotos.push({ url: inspection.approvedSamplePhoto, label: 'Approved Sample' });
+  if (inspection.redSealFrontPhoto) allPhotos.push({ url: inspection.redSealFrontPhoto, label: 'Red Seal - Front' });
+  if (inspection.redSealBackPhoto) allPhotos.push({ url: inspection.redSealBackPhoto, label: 'Red Seal - Back' });
+  if (inspection.redSealCloseUpPhoto) allPhotos.push({ url: inspection.redSealCloseUpPhoto, label: 'Close-up with Red Seal' });
+  if (inspection.redSealProductFront) allPhotos.push({ url: inspection.redSealProductFront, label: 'Front with Red Seal' });
+  if (inspection.redSealProductBack) allPhotos.push({ url: inspection.redSealProductBack, label: 'Back with Red Seal' });
+  if (inspection.labelPhoto) allPhotos.push({ url: inspection.labelPhoto, label: 'Label Photo' });
+  if (inspection.moisturePhoto) allPhotos.push({ url: inspection.moisturePhoto, label: 'Moisture Photo' });
+  if (inspection.sizeFrontPhoto) allPhotos.push({ url: inspection.sizeFrontPhoto, label: 'Size - Front' });
+  if (inspection.sizeSidePhoto) allPhotos.push({ url: inspection.sizeSidePhoto, label: 'Size - Side' });
+  if (inspection.inspectedSamplesPhoto) allPhotos.push({ url: inspection.inspectedSamplesPhoto, label: 'Inspected Samples' });
+  if (inspection.metalCheckingPhoto) allPhotos.push({ url: inspection.metalCheckingPhoto, label: 'Metal Checking' });
+
+  // New Images section
+  if (inspection.stackedGoodsPhoto) allPhotos.push({ url: inspection.stackedGoodsPhoto, label: 'Stacked Packed Goods' });
+  if (inspection.consumerPieces && inspection.consumerPieces.length > 0) {
+    for (const piece of inspection.consumerPieces) {
+      if (piece.url) allPhotos.push({ url: piece.url, label: piece.label });
     }
+  }
+  if (inspection.unitLoadEnabled && inspection.unitLoadPhotos && inspection.unitLoadPhotos.length > 0) {
+    for (const photo of inspection.unitLoadPhotos) {
+      if (photo.url) allPhotos.push({ url: photo.url, label: `Unit Load - ${photo.label}` });
+    }
+  }
 
+  // Construction photos
+  if (inspection.constructionPhotos) {
+    if (inspection.constructionPhotos.warpPer10cm) allPhotos.push({ url: inspection.constructionPhotos.warpPer10cm, label: 'Warp per 10 cms' });
+    if (inspection.constructionPhotos.weftPer10cm) allPhotos.push({ url: inspection.constructionPhotos.weftPer10cm, label: 'Weft per 10 cms' });
+    if (inspection.constructionPhotos.pileHeightPhoto) allPhotos.push({ url: inspection.constructionPhotos.pileHeightPhoto, label: 'Pile Height' });
+    if (inspection.constructionPhotos.productNetWeightPhoto) allPhotos.push({ url: inspection.constructionPhotos.productNetWeightPhoto, label: 'Product Net Weight' });
+    if (inspection.constructionPhotos.productGrossWeightPhoto) allPhotos.push({ url: inspection.constructionPhotos.productGrossWeightPhoto, label: 'Product Gross Weight' });
+  }
+
+  // Other photos
+  for (let i = 0; i < inspection.otherPhotos.length; i++) {
+    if (inspection.otherPhotos[i]) allPhotos.push({ url: inspection.otherPhotos[i], label: `Other Photo ${i + 1}` });
+  }
+
+  // NOT OK photos
+  if (inspection.notOkPhotos && inspection.notOkPhotos.length > 0) {
+    for (const notOkPhoto of inspection.notOkPhotos) {
+      const fieldInfo = OK_NOT_OK_FIELDS.find((f: { key: string }) => f.key === notOkPhoto.field);
+      const fieldLabel = fieldInfo ? fieldInfo.label : notOkPhoto.field;
+      if (notOkPhoto.photo) allPhotos.push({ url: notOkPhoto.photo, label: `NOT OK - ${fieldLabel}` });
+    }
+  }
+
+  // Load all images and get dimensions
+  for (const photo of allPhotos) {
+    const base64 = await urlToBase64(photo.url);
+    photo.base64 = base64;
+    if (base64) {
+      try {
+        const img = new Image();
+        await new Promise<void>((resolve) => {
+          img.onload = () => {
+            photo.width = img.naturalWidth || img.width;
+            photo.height = img.naturalHeight || img.height;
+            resolve();
+          };
+          img.onerror = () => resolve();
+          img.src = base64;
+        });
+      } catch {
+        // Image dimensions not available
+      }
+    }
+  }
+
+  // Filter out photos that failed to load
+  const loadedPhotos = allPhotos.filter(p => p.base64);
+
+  // Add photos in 1x2 grid (2 per page - stacked vertically)
+  const PHOTOS_PER_PAGE = 2;
+  const GRID_COLS = 1;
+  const GRID_ROWS = 2;
+  const MARGIN = 15;
+  const HEADER_HEIGHT = 25;
+  const FOOTER_HEIGHT = 20;
+  const CELL_PADDING = 5;
+  const LABEL_HEIGHT = 12;
+
+  const availableWidth = pageWidth - (MARGIN * 2);
+  const availableHeight = pageHeight - HEADER_HEIGHT - FOOTER_HEIGHT - MARGIN;
+  const cellWidth = (availableWidth - CELL_PADDING) / GRID_COLS;
+  const cellHeight = (availableHeight - CELL_PADDING) / GRID_ROWS;
+  const imageMaxWidth = cellWidth - CELL_PADDING * 2;
+  const imageMaxHeight = cellHeight - LABEL_HEIGHT - CELL_PADDING * 2;
+
+  for (let pageStart = 0; pageStart < loadedPhotos.length; pageStart += PHOTOS_PER_PAGE) {
     doc.addPage();
 
     // Page header
@@ -535,108 +692,74 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(255, 255, 255);
-    doc.text(title, pageWidth / 2, 13, { align: 'center' });
+    const pageNum = Math.floor(pageStart / PHOTOS_PER_PAGE) + 1;
+    const totalPages = Math.ceil(loadedPhotos.length / PHOTOS_PER_PAGE);
+    doc.text(`Photo Documentation (${pageNum}/${totalPages})`, pageWidth / 2, 13, { align: 'center' });
 
-    try {
-      // Create temp image to get dimensions
-      const img = new Image();
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = reject;
-        img.src = base64;
-      });
+    const pagePhotos = loadedPhotos.slice(pageStart, pageStart + PHOTOS_PER_PAGE);
 
-      const maxWidth = pageWidth - 30;
-      const maxHeight = pageHeight - 50;
-      let imgWidth = img.width;
-      let imgHeight = img.height;
+    for (let i = 0; i < pagePhotos.length; i++) {
+      const photo = pagePhotos[i];
+      const col = i % GRID_COLS;
+      const row = Math.floor(i / GRID_COLS);
 
-      // Scale to fit
-      const scale = Math.min(maxWidth / imgWidth, maxHeight / imgHeight);
-      imgWidth *= scale;
-      imgHeight *= scale;
+      const cellX = MARGIN + col * (cellWidth + CELL_PADDING / 2);
+      const cellY = HEADER_HEIGHT + row * (cellHeight + CELL_PADDING / 2);
 
-      const x = (pageWidth - imgWidth) / 2;
-      const imgY = 28;
-
-      // Image border
+      // Draw cell background
+      doc.setFillColor(250, 250, 250);
       doc.setDrawColor(229, 231, 235);
-      doc.setLineWidth(0.5);
-      doc.rect(x - 2, imgY - 2, imgWidth + 4, imgHeight + 4);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(cellX, cellY, cellWidth, cellHeight, 2, 2, 'FD');
 
-      doc.addImage(base64, 'JPEG', x, imgY, imgWidth, imgHeight);
-    } catch (error) {
-      doc.setTextColor(...lightGray);
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-      doc.text('Image could not be rendered', pageWidth / 2, 100, { align: 'center' });
+      // Calculate image dimensions maintaining aspect ratio
+      const origWidth = photo.width || 400;
+      const origHeight = photo.height || 300;
+      const aspectRatio = origWidth / origHeight;
+
+      let imgWidth: number;
+      let imgHeight: number;
+
+      if (aspectRatio > imageMaxWidth / imageMaxHeight) {
+        // Image is wider - fit to width
+        imgWidth = imageMaxWidth;
+        imgHeight = imgWidth / aspectRatio;
+      } else {
+        // Image is taller - fit to height
+        imgHeight = imageMaxHeight;
+        imgWidth = imgHeight * aspectRatio;
+      }
+
+      // Center image in cell
+      const imgX = cellX + (cellWidth - imgWidth) / 2;
+      const imgY = cellY + CELL_PADDING;
+
+      try {
+        doc.addImage(photo.base64!, 'JPEG', imgX, imgY, imgWidth, imgHeight);
+      } catch {
+        // Failed to add image
+        doc.setTextColor(...lightGray);
+        doc.setFontSize(8);
+        doc.text('Image error', cellX + cellWidth / 2, cellY + cellHeight / 2, { align: 'center' });
+      }
+
+      // Add label below image
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...darkGray);
+
+      // Truncate label if too long
+      let label = photo.label;
+      const maxLabelWidth = cellWidth - CELL_PADDING * 2;
+      while (doc.getTextWidth(label) > maxLabelWidth && label.length > 3) {
+        label = label.slice(0, -1);
+      }
+      if (label !== photo.label) label += '...';
+
+      doc.text(label, cellX + cellWidth / 2, cellY + cellHeight - CELL_PADDING, { align: 'center' });
     }
 
     addFooter();
-  };
-
-  // Add all photos
-  await addImagePage(inspection.approvedSamplePhoto, 'Approved Sample');
-  // Red Seal Photos
-  await addImagePage(inspection.redSealFrontPhoto, 'Red Seal - Front');
-  await addImagePage(inspection.redSealBackPhoto, 'Red Seal - Back');
-  await addImagePage(inspection.redSealCloseUpPhoto, 'Close-up with Red Seal');
-  await addImagePage(inspection.redSealProductFront, 'Front Photo with Red Seal');
-  await addImagePage(inspection.redSealProductBack, 'Back Photo with Red Seal');
-  // Other standard photos
-  await addImagePage(inspection.labelPhoto, 'Label Photo');
-  await addImagePage(inspection.moisturePhoto, 'Moisture Photo');
-  await addImagePage(inspection.sizeFrontPhoto, 'Size - Front');
-  await addImagePage(inspection.sizeSidePhoto, 'Size - Side');
-  await addImagePage(inspection.inspectedSamplesPhoto, 'Inspected Samples');
-  await addImagePage(inspection.metalCheckingPhoto, 'Metal Checking');
-
-  // New Images section photos
-  if (inspection.stackedGoodsPhoto) {
-    await addImagePage(inspection.stackedGoodsPhoto, 'Stacked Images of Packed Goods');
-  }
-  if (inspection.consumerPieces && inspection.consumerPieces.length > 0) {
-    for (const piece of inspection.consumerPieces) {
-      await addImagePage(piece.url, `Consumer Piece - ${piece.label}`);
-    }
-  }
-  if (inspection.unitLoadEnabled && inspection.unitLoadPhotos && inspection.unitLoadPhotos.length > 0) {
-    for (const photo of inspection.unitLoadPhotos) {
-      await addImagePage(photo.url, `Unit Load - ${photo.label}`);
-    }
-  }
-
-  // Construction photos
-  if (inspection.constructionPhotos) {
-    if (inspection.constructionPhotos.warpPer10cm) {
-      await addImagePage(inspection.constructionPhotos.warpPer10cm, 'Construction - Warp per 10 cms');
-    }
-    if (inspection.constructionPhotos.weftPer10cm) {
-      await addImagePage(inspection.constructionPhotos.weftPer10cm, 'Construction - Weft per 10 cms');
-    }
-    if (inspection.constructionPhotos.pileHeightPhoto) {
-      await addImagePage(inspection.constructionPhotos.pileHeightPhoto, 'Construction - Pile Height');
-    }
-    if (inspection.constructionPhotos.productNetWeightPhoto) {
-      await addImagePage(inspection.constructionPhotos.productNetWeightPhoto, 'Construction - Product Net Weight');
-    }
-    if (inspection.constructionPhotos.productGrossWeightPhoto) {
-      await addImagePage(inspection.constructionPhotos.productGrossWeightPhoto, 'Construction - Product Gross Weight');
-    }
-  }
-
-  for (let i = 0; i < inspection.otherPhotos.length; i++) {
-    await addImagePage(inspection.otherPhotos[i], `Other Photo ${i + 1}`);
-  }
-
-  // Add NOT OK photos
-  if (inspection.notOkPhotos && inspection.notOkPhotos.length > 0) {
-    for (const notOkPhoto of inspection.notOkPhotos) {
-      // Find the field label from OK_NOT_OK_FIELDS
-      const fieldInfo = OK_NOT_OK_FIELDS.find((f: { key: string }) => f.key === notOkPhoto.field);
-      const fieldLabel = fieldInfo ? fieldInfo.label : notOkPhoto.field;
-      await addImagePage(notOkPhoto.photo, `NOT OK - ${fieldLabel}`);
-    }
   }
 
   return doc.output('datauristring').split(',')[1];

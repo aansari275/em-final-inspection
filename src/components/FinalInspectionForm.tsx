@@ -1516,17 +1516,27 @@ export function FinalInspectionForm() {
           </div>
         `;
 
-        await fetch('/.netlify/functions/send-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            to: allRecipients,
-            subject: `Final Inspection: ${inspection.customerName} - ${inspection.buyerDesignName} [${inspection.inspectionResult}]`,
-            html: emailHtml,
-            pdfBase64,
-            pdfFilename: `Final_Inspection_${inspection.opsNo}_${inspection.inspectionDate}.pdf`
-          })
-        });
+        try {
+          const emailResponse = await fetch('/.netlify/functions/send-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              to: allRecipients,
+              subject: `Final Inspection: ${inspection.customerName} - ${inspection.buyerDesignName} [${inspection.inspectionResult}]`,
+              html: emailHtml,
+              pdfBase64,
+              pdfFilename: `Final_Inspection_${inspection.opsNo}_${inspection.inspectionDate}.pdf`
+            })
+          });
+
+          if (!emailResponse.ok) {
+            console.warn('Email sending failed:', emailResponse.status);
+            // Don't block submission if email fails
+          }
+        } catch (emailError) {
+          console.warn('Email sending error (inspection saved successfully):', emailError);
+          // Don't block submission if email fails
+        }
       }
 
       setSuccess(true);
