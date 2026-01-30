@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { collection, addDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, getCustomers, addCustomer } from '../lib/firebase';
+import { db, storage, getCustomers, addCustomer, getDesignNames, addDesignName, DesignName, getOpsByNumber, getOpsList, OpsOrder, OpsOrderItem } from '../lib/firebase';
 import { emailSettingsService } from '../lib/emailSettingsService';
 import { generateFinalInspectionPDF } from '../lib/pdfGenerator';
 import {
@@ -18,9 +18,13 @@ import {
   OK_NOT_OK_FIELDS,
   Customer,
   STANDARD_SIZES_CM,
-  STANDARD_SIZES_FEET
+  STANDARD_SIZES_FEET,
+  LabeledPhoto,
+  CONSUMER_PIECE_LABELS,
+  UNIT_LOAD_LABELS,
+  SelectedArticle
 } from '../types';
-import { Loader2, Upload, X, Camera, CheckCircle2, XCircle, Plus, Save } from 'lucide-react';
+import { Loader2, Upload, X, Camera, CheckCircle2, XCircle, Plus, Save, Search, Package, AlertCircle, ChevronDown } from 'lucide-react';
 
 // Draft storage key
 const DRAFT_STORAGE_KEY = 'finalInspectionDraft';
@@ -331,8 +335,9 @@ function NotOkPhotoUpload({ fieldLabel, isNotOk, preview, onPhotoChange }: NotOk
 }
 
 type PhotoKey = keyof Pick<FinalInspection,
-  'approvedSamplePhoto' | 'idPhoto' | 'redSealFrontPhoto' | 'redSealSidePhoto' |
-  'backPhoto' | 'labelPhoto' | 'moisturePhoto' | 'sizeFrontPhoto' | 'sizeSidePhoto' |
+  'approvedSamplePhoto' | 'idPhoto' | 'redSealFrontPhoto' | 'redSealBackPhoto' |
+  'redSealCloseUpPhoto' | 'redSealProductFront' | 'redSealProductBack' |
+  'labelPhoto' | 'moisturePhoto' | 'sizeFrontPhoto' | 'sizeSidePhoto' |
   'inspectedSamplesPhoto' | 'metalCheckingPhoto'
 >;
 
@@ -491,6 +496,23 @@ export function FinalInspectionForm() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customersLoading, setCustomersLoading] = useState(true);
 
+  // Design names from shared collection
+  const [designNames, setDesignNames] = useState<DesignName[]>([]);
+  const [designNamesLoading, setDesignNamesLoading] = useState(true);
+
+  // OPS Lookup state
+  const [opsSearchValue, setOpsSearchValue] = useState('');
+  const [opsLoading, setOpsLoading] = useState(false);
+  const [opsData, setOpsData] = useState<OpsOrder | null>(null);
+  const [opsError, setOpsError] = useState<string>('');
+  const [selectedArticles, setSelectedArticles] = useState<SelectedArticle[]>([]);
+
+  // OPS dropdown list
+  const [opsList, setOpsList] = useState<Array<{ salesNo: string; buyerName: string; buyerCode: string; poNumber: string; totalPcs: number; status: string }>>([]);
+  const [opsListLoading, setOpsListLoading] = useState(true);
+  const [showOpsDropdown, setShowOpsDropdown] = useState(false);
+  const opsDropdownRef = useRef<HTMLDivElement>(null);
+
   // Load customers from Firestore on mount
   useEffect(() => {
     async function loadCustomers() {
@@ -504,6 +526,47 @@ export function FinalInspectionForm() {
       }
     }
     loadCustomers();
+  }, []);
+
+  // Load design names from shared collection on mount
+  useEffect(() => {
+    async function loadDesignNames() {
+      try {
+        const designs = await getDesignNames();
+        setDesignNames(designs);
+      } catch (error) {
+        console.error('Error loading design names:', error);
+      } finally {
+        setDesignNamesLoading(false);
+      }
+    }
+    loadDesignNames();
+  }, []);
+
+  // Load OPS list for dropdown
+  useEffect(() => {
+    async function loadOpsList() {
+      try {
+        const list = await getOpsList();
+        setOpsList(list);
+      } catch (error) {
+        console.error('Error loading OPS list:', error);
+      } finally {
+        setOpsListLoading(false);
+      }
+    }
+    loadOpsList();
+  }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (opsDropdownRef.current && !opsDropdownRef.current.contains(event.target as Node)) {
+        setShowOpsDropdown(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   // Load draft from localStorage on mount
@@ -581,6 +644,8 @@ export function FinalInspectionForm() {
     setCustomSizesCm(getCustomOptions(CUSTOM_OPTIONS_KEYS.customSizesCm));
     setCustomSizesFeet(getCustomOptions(CUSTOM_OPTIONS_KEYS.customSizesFeet));
     setCustomAqlLevels(getCustomOptions(CUSTOM_OPTIONS_KEYS.aqlLevels));
+    setCustomConsumerLabels(getCustomOptions(CUSTOM_OPTIONS_KEYS.consumerPieceLabels));
+    setCustomUnitLoadLabels(getCustomOptions(CUSTOM_OPTIONS_KEYS.unitLoadLabels));
   }, []);
 
   // Update formData.productSizes when selectedSizes changes
@@ -630,6 +695,88 @@ export function FinalInspectionForm() {
     saveCustomOptions(CUSTOM_OPTIONS_KEYS.aqlLevels, updated);
   };
 
+  // Add custom consumer piece label
+  const addCustomConsumerLabel = (value: string) => {
+    const updated = [...customConsumerLabels, value];
+    setCustomConsumerLabels(updated);
+    saveCustomOptions(CUSTOM_OPTIONS_KEYS.consumerPieceLabels, updated);
+  };
+
+  // Add custom unit load label
+  const addCustomUnitLoadLabel = (value: string) => {
+    const updated = [...customUnitLoadLabels, value];
+    setCustomUnitLoadLabels(updated);
+    saveCustomOptions(CUSTOM_OPTIONS_KEYS.unitLoadLabels, updated);
+  };
+
+  // Handle stacked goods photo
+  const handleStackedGoodsChange = (file: File | null) => {
+    setStackedGoodsPhoto(file);
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => setStackedGoodsPreview(e.target?.result as string);
+      reader.readAsDataURL(file);
+    } else {
+      setStackedGoodsPreview('');
+    }
+  };
+
+  // Add consumer piece photo
+  const addConsumerPiece = () => {
+    setConsumerPieces(prev => [...prev, { label: '', preview: '' }]);
+  };
+
+  // Update consumer piece
+  const updateConsumerPiece = (index: number, updates: Partial<LabeledPhoto>) => {
+    setConsumerPieces(prev => prev.map((item, i) => i === index ? { ...item, ...updates } : item));
+  };
+
+  // Handle consumer piece photo upload
+  const handleConsumerPiecePhoto = (index: number, file: File | null) => {
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        updateConsumerPiece(index, { file, preview: e.target?.result as string });
+      };
+      reader.readAsDataURL(file);
+    } else {
+      updateConsumerPiece(index, { file: undefined, preview: '' });
+    }
+  };
+
+  // Remove consumer piece
+  const removeConsumerPiece = (index: number) => {
+    setConsumerPieces(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Add unit load photo
+  const addUnitLoadPhoto = () => {
+    setUnitLoadPhotos(prev => [...prev, { label: '', preview: '' }]);
+  };
+
+  // Update unit load photo
+  const updateUnitLoadPhoto = (index: number, updates: Partial<LabeledPhoto>) => {
+    setUnitLoadPhotos(prev => prev.map((item, i) => i === index ? { ...item, ...updates } : item));
+  };
+
+  // Handle unit load photo upload
+  const handleUnitLoadPhotoChange = (index: number, file: File | null) => {
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        updateUnitLoadPhoto(index, { file, preview: e.target?.result as string });
+      };
+      reader.readAsDataURL(file);
+    } else {
+      updateUnitLoadPhoto(index, { file: undefined, preview: '' });
+    }
+  };
+
+  // Remove unit load photo
+  const removeUnitLoadPhoto = (index: number) => {
+    setUnitLoadPhotos(prev => prev.filter((_, i) => i !== index));
+  };
+
   const toggleSize = (size: string) => {
     setSelectedSizes(prev =>
       prev.includes(size)
@@ -653,6 +800,140 @@ export function FinalInspectionForm() {
       console.error('Error adding customer:', error);
       alert('Failed to add customer. Please try again.');
     }
+  };
+
+  // Filter OPS list based on search value
+  const filteredOpsList = opsList.filter(ops => {
+    const search = opsSearchValue.toLowerCase();
+    return (
+      ops.salesNo.toLowerCase().includes(search) ||
+      ops.buyerName.toLowerCase().includes(search) ||
+      ops.buyerCode.toLowerCase().includes(search) ||
+      ops.poNumber.toLowerCase().includes(search)
+    );
+  });
+
+  // Handle OPS selection from dropdown
+  const handleOpsSelect = async (salesNo: string) => {
+    setOpsSearchValue(salesNo);
+    setShowOpsDropdown(false);
+    // Trigger lookup
+    await handleOpsLookupByValue(salesNo);
+  };
+
+  // Handle OPS lookup by value
+  const handleOpsLookupByValue = async (value: string) => {
+    if (!value.trim()) {
+      setOpsError('Please enter an OPS number');
+      return;
+    }
+
+    setOpsLoading(true);
+    setOpsError('');
+    setOpsData(null);
+    setSelectedArticles([]);
+
+    try {
+      const order = await getOpsByNumber(value.trim());
+
+      if (!order) {
+        setOpsError(`OPS "${value}" not found`);
+        return;
+      }
+
+      setOpsData(order);
+
+      // Auto-fill form data from OPS
+      setFormData(prev => ({
+        ...prev,
+        opsNo: order.salesNo,
+        customerName: order.buyerName,
+        customerCode: order.buyerCode,
+        customerPoNo: order.poNumber,
+        merchant: order.merchantCode,
+        totalOrderQty: order.totalPcs.toString(),
+      }));
+
+      // Convert items to selectable articles (all selected by default)
+      const articles: SelectedArticle[] = order.items.map(item => ({
+        id: item.id,
+        articleName: item.articleName,
+        size: item.size,
+        color: item.color,
+        quality: item.quality,
+        pcs: item.pcs,
+        sqm: item.sqm,
+        selected: true,
+        inspectedQty: item.pcs,
+      }));
+      setSelectedArticles(articles);
+
+      // Auto-fill EMPL Design No. from first article
+      if (articles.length > 0) {
+        setFormData(prev => ({
+          ...prev,
+          emplDesignNo: articles[0].articleName,
+        }));
+      }
+
+    } catch (error) {
+      console.error('Error looking up OPS:', error);
+      setOpsError('Error looking up OPS. Please try again.');
+    } finally {
+      setOpsLoading(false);
+    }
+  };
+
+  // Handle OPS lookup (button click)
+  const handleOpsLookup = async () => {
+    await handleOpsLookupByValue(opsSearchValue);
+  };
+
+  // Toggle article selection
+  const toggleArticleSelection = (articleId: string) => {
+    setSelectedArticles(prev => {
+      const updated = prev.map(article =>
+        article.id === articleId
+          ? { ...article, selected: !article.selected }
+          : article
+      );
+
+      // Auto-fill EMPL Design No. from first selected article
+      const firstSelected = updated.find(a => a.selected);
+      if (firstSelected) {
+        setFormData(f => ({ ...f, emplDesignNo: firstSelected.articleName }));
+      }
+
+      return updated;
+    });
+  };
+
+  // Update inspected quantity for an article
+  const updateArticleInspectedQty = (articleId: string, qty: number) => {
+    setSelectedArticles(prev => prev.map(article =>
+      article.id === articleId
+        ? { ...article, inspectedQty: Math.min(qty, article.pcs) }
+        : article
+    ));
+  };
+
+  // Clear OPS data and reset
+  const clearOpsData = () => {
+    setOpsData(null);
+    setOpsSearchValue('');
+    setSelectedArticles([]);
+    setOpsError('');
+    // Clear auto-filled fields
+    setFormData(prev => ({
+      ...prev,
+      opsNo: '',
+      customerName: '',
+      customerCode: '',
+      customerPoNo: '',
+      merchant: '',
+      emplDesignNo: '',
+      totalOrderQty: '',
+    }));
   };
 
   // Handle customer selection - auto-fill customer code
@@ -685,8 +966,10 @@ export function FinalInspectionForm() {
     approvedSamplePhoto: null,
     idPhoto: null,
     redSealFrontPhoto: null,
-    redSealSidePhoto: null,
-    backPhoto: null,
+    redSealBackPhoto: null,
+    redSealCloseUpPhoto: null,
+    redSealProductFront: null,
+    redSealProductBack: null,
     labelPhoto: null,
     moisturePhoto: null,
     sizeFrontPhoto: null,
@@ -699,8 +982,10 @@ export function FinalInspectionForm() {
     approvedSamplePhoto: '',
     idPhoto: '',
     redSealFrontPhoto: '',
-    redSealSidePhoto: '',
-    backPhoto: '',
+    redSealBackPhoto: '',
+    redSealCloseUpPhoto: '',
+    redSealProductFront: '',
+    redSealProductBack: '',
     labelPhoto: '',
     moisturePhoto: '',
     sizeFrontPhoto: '',
@@ -708,6 +993,15 @@ export function FinalInspectionForm() {
     inspectedSamplesPhoto: '',
     metalCheckingPhoto: '',
   });
+
+  // New Images section state
+  const [stackedGoodsPhoto, setStackedGoodsPhoto] = useState<File | null>(null);
+  const [stackedGoodsPreview, setStackedGoodsPreview] = useState<string>('');
+  const [consumerPieces, setConsumerPieces] = useState<LabeledPhoto[]>([]);
+  const [customConsumerLabels, setCustomConsumerLabels] = useState<string[]>([]);
+  const [unitLoadEnabled, setUnitLoadEnabled] = useState<boolean>(false);
+  const [unitLoadPhotos, setUnitLoadPhotos] = useState<LabeledPhoto[]>([]);
+  const [customUnitLoadLabels, setCustomUnitLoadLabels] = useState<string[]>([]);
 
   const [otherPhotos, setOtherPhotos] = useState<File[]>([]);
   const [otherPreviews, setOtherPreviews] = useState<string[]>([]);
@@ -794,6 +1088,43 @@ export function FinalInspectionForm() {
         }
       }
 
+      // Upload stacked goods photo
+      let stackedGoodsUrl = '';
+      if (stackedGoodsPhoto) {
+        stackedGoodsUrl = await uploadPhoto(
+          stackedGoodsPhoto,
+          `final-inspection-images/${timestamp}_stacked_goods_${stackedGoodsPhoto.name}`
+        );
+      }
+
+      // Upload consumer pieces photos
+      const consumerPiecesUrls: Array<{ label: string; url: string }> = [];
+      for (let i = 0; i < consumerPieces.length; i++) {
+        const piece = consumerPieces[i];
+        if (piece.file && piece.label) {
+          const url = await uploadPhoto(
+            piece.file,
+            `final-inspection-images/${timestamp}_consumer_${i}_${piece.file.name}`
+          );
+          consumerPiecesUrls.push({ label: piece.label, url });
+        }
+      }
+
+      // Upload unit load photos (if enabled)
+      const unitLoadPhotoUrls: Array<{ label: string; url: string }> = [];
+      if (unitLoadEnabled) {
+        for (let i = 0; i < unitLoadPhotos.length; i++) {
+          const photo = unitLoadPhotos[i];
+          if (photo.file && photo.label) {
+            const url = await uploadPhoto(
+              photo.file,
+              `final-inspection-images/${timestamp}_unitload_${i}_${photo.file.name}`
+            );
+            unitLoadPhotoUrls.push({ label: photo.label, url });
+          }
+        }
+      }
+
       const inspection: FinalInspection = {
         // Company & Document
         company: formData.company,
@@ -868,8 +1199,10 @@ export function FinalInspectionForm() {
         approvedSamplePhoto: photoUrls.approvedSamplePhoto || '',
         idPhoto: photoUrls.idPhoto || '',
         redSealFrontPhoto: photoUrls.redSealFrontPhoto || '',
-        redSealSidePhoto: photoUrls.redSealSidePhoto || '',
-        backPhoto: photoUrls.backPhoto || '',
+        redSealBackPhoto: photoUrls.redSealBackPhoto || '',
+        redSealCloseUpPhoto: photoUrls.redSealCloseUpPhoto || '',
+        redSealProductFront: photoUrls.redSealProductFront || '',
+        redSealProductBack: photoUrls.redSealProductBack || '',
         labelPhoto: photoUrls.labelPhoto || '',
         moisturePhoto: photoUrls.moisturePhoto || '',
         sizeFrontPhoto: photoUrls.sizeFrontPhoto || '',
@@ -877,6 +1210,23 @@ export function FinalInspectionForm() {
         inspectedSamplesPhoto: photoUrls.inspectedSamplesPhoto || '',
         metalCheckingPhoto: photoUrls.metalCheckingPhoto || '',
         otherPhotos: otherPhotoUrls,
+        // New Images section
+        stackedGoodsPhoto: stackedGoodsUrl,
+        consumerPieces: consumerPiecesUrls,
+        unitLoadEnabled: unitLoadEnabled,
+        unitLoadPhotos: unitLoadPhotoUrls,
+        // Inspected articles from OPS
+        inspectedArticles: selectedArticles
+          .filter(a => a.selected)
+          .map(a => ({
+            articleName: a.articleName,
+            size: a.size,
+            color: a.color,
+            quality: a.quality,
+            pcs: a.pcs,
+            sqm: a.sqm,
+            inspectedQty: a.inspectedQty || a.pcs,
+          })),
         // NOT OK photos
         notOkPhotos: notOkPhotoUrls,
         // Size unit
@@ -898,15 +1248,20 @@ export function FinalInspectionForm() {
         const allPhotos = [
           { url: inspection.approvedSamplePhoto, label: 'Approved Sample' },
           { url: inspection.idPhoto, label: 'ID Photo' },
-          { url: inspection.redSealFrontPhoto, label: 'Red Seal Front' },
-          { url: inspection.redSealSidePhoto, label: 'Red Seal Side' },
-          { url: inspection.backPhoto, label: 'Back' },
+          { url: inspection.redSealFrontPhoto, label: 'Red Seal - Front' },
+          { url: inspection.redSealBackPhoto, label: 'Red Seal - Back' },
+          { url: inspection.redSealCloseUpPhoto, label: 'Close-up with Red Seal' },
+          { url: inspection.redSealProductFront, label: 'Front Photo with Red Seal' },
+          { url: inspection.redSealProductBack, label: 'Back Photo with Red Seal' },
           { url: inspection.labelPhoto, label: 'Label' },
           { url: inspection.moisturePhoto, label: 'Moisture' },
           { url: inspection.sizeFrontPhoto, label: 'Size Front' },
           { url: inspection.sizeSidePhoto, label: 'Size Side' },
           { url: inspection.inspectedSamplesPhoto, label: 'Inspected Samples' },
           { url: inspection.metalCheckingPhoto, label: 'Metal Checking' },
+          ...(inspection.stackedGoodsPhoto ? [{ url: inspection.stackedGoodsPhoto, label: 'Stacked Goods' }] : []),
+          ...(inspection.consumerPieces || []).map(p => ({ url: p.url, label: p.label })),
+          ...(inspection.unitLoadPhotos || []).map(p => ({ url: p.url, label: p.label })),
           ...inspection.otherPhotos.map((url, i) => ({ url, label: `Other ${i + 1}` }))
         ].filter(p => p.url);
 
@@ -939,6 +1294,39 @@ export function FinalInspectionForm() {
                 <tr><td style="padding: 8px 0; color: #6b7280;">Sizes:</td><td style="padding: 8px 0;">${inspection.productSizes}</td></tr>
                 <tr><td style="padding: 8px 0; color: #6b7280;">Merchant:</td><td style="padding: 8px 0;">${inspection.merchant}</td></tr>
               </table>
+
+              ${inspection.inspectedArticles && inspection.inspectedArticles.length > 0 ? `
+              <h3 style="color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; margin-top: 20px;">Inspected Articles</h3>
+              <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                <thead>
+                  <tr style="background-color: #f3f4f6;">
+                    <th style="padding: 8px; text-align: left; color: #374151;">Article</th>
+                    <th style="padding: 8px; text-align: left; color: #374151;">Size</th>
+                    <th style="padding: 8px; text-align: left; color: #374151;">Color</th>
+                    <th style="padding: 8px; text-align: right; color: #374151;">Total Pcs</th>
+                    <th style="padding: 8px; text-align: right; color: #374151;">Inspected</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${inspection.inspectedArticles.map(article => `
+                  <tr style="border-bottom: 1px solid #e5e7eb;">
+                    <td style="padding: 8px; color: #374151;">${article.articleName || '-'}</td>
+                    <td style="padding: 8px; color: #6b7280;">${article.size || '-'}</td>
+                    <td style="padding: 8px; color: #6b7280;">${article.color || '-'}</td>
+                    <td style="padding: 8px; text-align: right; color: #6b7280;">${article.pcs || 0}</td>
+                    <td style="padding: 8px; text-align: right; color: #00525e; font-weight: bold;">${article.inspectedQty || article.pcs || 0}</td>
+                  </tr>
+                  `).join('')}
+                </tbody>
+                <tfoot>
+                  <tr style="background-color: #f3f4f6; font-weight: bold;">
+                    <td colspan="3" style="padding: 8px; color: #374151;">Total</td>
+                    <td style="padding: 8px; text-align: right; color: #374151;">${inspection.inspectedArticles.reduce((sum, a) => sum + (a.pcs || 0), 0)}</td>
+                    <td style="padding: 8px; text-align: right; color: #00525e;">${inspection.inspectedArticles.reduce((sum, a) => sum + (a.inspectedQty || a.pcs || 0), 0)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+              ` : ''}
 
               <h3 style="color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; margin-top: 20px;">Quantities</h3>
               <table style="width: 100%; border-collapse: collapse;">
@@ -1009,8 +1397,10 @@ export function FinalInspectionForm() {
         approvedSamplePhoto: null,
         idPhoto: null,
         redSealFrontPhoto: null,
-        redSealSidePhoto: null,
-        backPhoto: null,
+        redSealBackPhoto: null,
+        redSealCloseUpPhoto: null,
+        redSealProductFront: null,
+        redSealProductBack: null,
         labelPhoto: null,
         moisturePhoto: null,
         sizeFrontPhoto: null,
@@ -1022,8 +1412,10 @@ export function FinalInspectionForm() {
         approvedSamplePhoto: '',
         idPhoto: '',
         redSealFrontPhoto: '',
-        redSealSidePhoto: '',
-        backPhoto: '',
+        redSealBackPhoto: '',
+        redSealCloseUpPhoto: '',
+        redSealProductFront: '',
+        redSealProductBack: '',
         labelPhoto: '',
         moisturePhoto: '',
         sizeFrontPhoto: '',
@@ -1033,6 +1425,17 @@ export function FinalInspectionForm() {
       });
       setOtherPhotos([]);
       setOtherPreviews([]);
+      // Reset new Images section
+      setStackedGoodsPhoto(null);
+      setStackedGoodsPreview('');
+      setConsumerPieces([]);
+      setUnitLoadEnabled(false);
+      setUnitLoadPhotos([]);
+      // Reset OPS data
+      setOpsData(null);
+      setOpsSearchValue('');
+      setSelectedArticles([]);
+      setOpsError('');
 
     } catch (error) {
       console.error('Error submitting inspection:', error);
@@ -1070,6 +1473,530 @@ export function FinalInspectionForm() {
         </div>
       )}
 
+      {/* OPS Lookup - Primary Entry */}
+      <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg shadow-sm border border-emerald-200 p-6">
+        <h2 className="text-lg font-semibold text-emerald-800 mb-4 flex items-center gap-2">
+          <Search className="w-5 h-5" />
+          OPS Lookup
+        </h2>
+
+        <div className="flex gap-3 mb-4">
+          {/* Searchable Dropdown */}
+          <div className="flex-1 relative" ref={opsDropdownRef}>
+            <div className="relative">
+              <input
+                type="text"
+                value={opsSearchValue}
+                onChange={(e) => {
+                  setOpsSearchValue(e.target.value);
+                  setShowOpsDropdown(true);
+                }}
+                onFocus={() => !opsData && setShowOpsDropdown(true)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleOpsLookup();
+                    setShowOpsDropdown(false);
+                  }
+                  if (e.key === 'Escape') {
+                    setShowOpsDropdown(false);
+                  }
+                }}
+                placeholder={opsListLoading ? "Loading OPS list..." : "Search or select OPS number..."}
+                className="w-full px-4 py-3 pr-10 text-lg border-2 border-emerald-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                disabled={!!opsData}
+              />
+              {!opsData && (
+                <button
+                  type="button"
+                  onClick={() => setShowOpsDropdown(!showOpsDropdown)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <ChevronDown className={`w-5 h-5 transition-transform ${showOpsDropdown ? 'rotate-180' : ''}`} />
+                </button>
+              )}
+            </div>
+
+            {/* Dropdown List */}
+            {showOpsDropdown && !opsData && (
+              <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-80 overflow-y-auto">
+                {opsListLoading ? (
+                  <div className="p-4 text-center text-gray-500">
+                    <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2" />
+                    Loading OPS list...
+                  </div>
+                ) : filteredOpsList.length === 0 ? (
+                  <div className="p-4 text-center text-gray-500">
+                    {opsSearchValue ? `No OPS found matching "${opsSearchValue}"` : 'No OPS orders available'}
+                  </div>
+                ) : (
+                  filteredOpsList.slice(0, 50).map((ops) => (
+                    <button
+                      key={ops.salesNo}
+                      type="button"
+                      onClick={() => handleOpsSelect(ops.salesNo)}
+                      className="w-full px-4 py-3 text-left hover:bg-emerald-50 border-b border-gray-100 last:border-b-0 transition-colors"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-semibold text-emerald-700">{ops.salesNo}</p>
+                          <p className="text-sm text-gray-600">{ops.buyerName} ({ops.buyerCode})</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-medium">{ops.totalPcs} pcs</p>
+                          {ops.poNumber && <p className="text-xs text-gray-500">PO: {ops.poNumber}</p>}
+                        </div>
+                      </div>
+                    </button>
+                  ))
+                )}
+                {filteredOpsList.length > 50 && (
+                  <p className="p-3 text-center text-sm text-gray-500 bg-gray-50">
+                    Showing first 50 results. Type to filter more.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {!opsData ? (
+            <button
+              type="button"
+              onClick={handleOpsLookup}
+              disabled={opsLoading || !opsSearchValue.trim()}
+              className="px-6 py-3 bg-emerald-600 text-white font-semibold rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {opsLoading ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Loading...
+                </>
+              ) : (
+                <>
+                  <Search className="w-5 h-5" />
+                  Load
+                </>
+              )}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={clearOpsData}
+              className="px-6 py-3 border-2 border-gray-300 text-gray-600 font-semibold rounded-lg hover:bg-gray-50 flex items-center gap-2"
+            >
+              <X className="w-5 h-5" />
+              Clear
+            </button>
+          )}
+        </div>
+
+        {opsError && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-center gap-2 text-red-700 mb-4">
+            <AlertCircle className="w-5 h-5" />
+            {opsError}
+          </div>
+        )}
+
+        {/* OPS Data Display */}
+        {opsData && (
+          <div className="bg-white rounded-lg border border-emerald-200 p-4 space-y-4">
+            {/* Order Summary */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pb-4 border-b border-gray-200">
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wide">OPS Number</p>
+                <p className="font-semibold text-emerald-700">{opsData.salesNo}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wide">Customer</p>
+                <p className="font-semibold">{opsData.buyerName} ({opsData.buyerCode})</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wide">PO Number</p>
+                <p className="font-semibold">{opsData.poNumber || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wide">Total Qty</p>
+                <p className="font-semibold">{opsData.totalPcs} pcs</p>
+              </div>
+            </div>
+
+            {/* Articles List */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                <Package className="w-4 h-4" />
+                Articles in this OPS ({opsData.items.length} items)
+              </h3>
+
+              {opsData.items.length === 0 ? (
+                <p className="text-gray-500 italic">No items found in this OPS</p>
+              ) : (
+                <div className="space-y-2">
+                  {selectedArticles.map((article) => (
+                    <div
+                      key={article.id}
+                      className={`flex items-center gap-4 p-3 rounded-lg border transition-colors ${
+                        article.selected
+                          ? 'bg-emerald-50 border-emerald-300'
+                          : 'bg-gray-50 border-gray-200'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={article.selected}
+                        onChange={() => toggleArticleSelection(article.id)}
+                        className="w-5 h-5 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-gray-900 truncate">{article.articleName}</p>
+                        <p className="text-sm text-gray-500">
+                          {[article.size, article.color, article.quality].filter(Boolean).join(' • ') || 'No details'}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-medium">{article.pcs} pcs</p>
+                        {article.sqm > 0 && <p className="text-xs text-gray-500">{article.sqm.toFixed(2)} sqm</p>}
+                      </div>
+                      {article.selected && (
+                        <div className="w-24">
+                          <label className="text-xs text-gray-500">Inspect Qty</label>
+                          <input
+                            type="number"
+                            min="1"
+                            max={article.pcs}
+                            value={article.inspectedQty || article.pcs}
+                            onChange={(e) => updateArticleInspectedQty(article.id, parseInt(e.target.value) || 0)}
+                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-emerald-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Selection Summary */}
+              {selectedArticles.length > 0 && (
+                <div className="mt-4 pt-3 border-t border-gray-200 flex justify-between items-center">
+                  <p className="text-sm text-gray-600">
+                    <span className="font-medium">{selectedArticles.filter(a => a.selected).length}</span> of {selectedArticles.length} articles selected
+                  </p>
+                  <p className="text-sm font-medium text-emerald-700">
+                    Total to inspect: {selectedArticles.filter(a => a.selected).reduce((sum, a) => sum + (a.inspectedQty || a.pcs), 0)} pcs
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* EMPL Design, Color, Sizes, Merchant - Auto-filled from OPS */}
+            <div className="mt-6 pt-4 border-t border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Additional Details</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className={labelClass}>EMPL Design No. *</label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.emplDesignNo}
+                    onChange={(e) => setFormData({ ...formData, emplDesignNo: e.target.value })}
+                    placeholder="Auto-filled from article selection"
+                    className={`${inputClass} ${formData.emplDesignNo ? 'bg-emerald-50 border-emerald-300' : ''}`}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Auto-filled from selected article (editable)</p>
+                </div>
+                <div>
+                  <label className={labelClass}>Color Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.colorName}
+                    onChange={(e) => setFormData({ ...formData, colorName: e.target.value })}
+                    placeholder="Enter color name"
+                    className={inputClass}
+                  />
+                </div>
+                <DropdownWithAdd
+                  label="Merchant"
+                  value={formData.merchant}
+                  onChange={(value) => setFormData({ ...formData, merchant: value })}
+                  options={MERCHANTS}
+                  customOptions={customMerchants}
+                  onAddCustom={addCustomMerchant}
+                  required
+                  placeholder="Select Merchant"
+                />
+                <div className="md:col-span-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className={labelClass}>Product Sizes *</label>
+                    <div className="flex border border-gray-300 rounded-lg overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setSizeUnit('cm')}
+                        className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                          sizeUnit === 'cm'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        cm
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSizeUnit('feet')}
+                        className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                          sizeUnit === 'feet'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        feet
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Selected sizes */}
+                  {selectedSizes.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {selectedSizes.map(size => (
+                        <span
+                          key={size}
+                          className="inline-flex items-center gap-1 px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full text-sm font-medium"
+                        >
+                          {size}
+                          <button
+                            type="button"
+                            onClick={() => removeSize(size)}
+                            className="hover:text-emerald-600"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Standard sizes as clickable tags */}
+                  <div className="flex flex-wrap gap-2 items-center">
+                    {(sizeUnit === 'cm' ? [...STANDARD_SIZES_CM, ...customSizesCm] : [...STANDARD_SIZES_FEET, ...customSizesFeet]).map(size => (
+                      <button
+                        key={size}
+                        type="button"
+                        onClick={() => toggleSize(size)}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                          selectedSizes.includes(size)
+                            ? 'bg-emerald-600 text-white border-emerald-600'
+                            : 'bg-white text-gray-700 border-gray-300 hover:border-emerald-400 hover:text-emerald-600'
+                        }`}
+                      >
+                        {size}
+                      </button>
+                    ))}
+
+                    {/* Add custom size button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newSize = prompt(`Enter custom size (${sizeUnit}):`);
+                        if (newSize && newSize.trim()) {
+                          addCustomSize(newSize.trim());
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-sm font-medium border border-dashed border-gray-400 text-gray-600 hover:border-emerald-500 hover:text-emerald-600 transition-colors flex items-center gap-1"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add Size
+                    </button>
+                  </div>
+
+                  {/* Hidden required input for form validation */}
+                  <input
+                    type="text"
+                    required
+                    value={formData.productSizes}
+                    onChange={() => {}}
+                    className="sr-only"
+                    tabIndex={-1}
+                  />
+                  {selectedSizes.length === 0 && (
+                    <p className="text-xs text-gray-500 mt-2">Click sizes to select, or add a custom size</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!opsData && !opsError && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-500 italic">
+              Enter an OPS number to auto-fill customer details and view articles
+            </p>
+
+            {/* Manual entry for EMPL Design, Color, Sizes, Merchant when no OPS */}
+            <div className="pt-4 border-t border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Additional Details (Manual Entry)</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className={labelClass}>EMPL Design No. *</label>
+                  <div className="flex border border-gray-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 bg-white">
+                    <select
+                      required
+                      value={formData.emplDesignNo}
+                      onChange={(e) => setFormData({ ...formData, emplDesignNo: e.target.value })}
+                      className="flex-1 px-3 py-2.5 text-sm border-0 focus:outline-none focus:ring-0 bg-transparent"
+                      disabled={designNamesLoading}
+                    >
+                      <option value="">{designNamesLoading ? 'Loading...' : 'Select Design...'}</option>
+                      {designNames.map((design) => (
+                        <option key={design.id} value={design.designName}>
+                          {design.designName}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newDesign = prompt('Enter new EMPL Design Name:');
+                        if (newDesign && newDesign.trim()) {
+                          addDesignName(newDesign.trim())
+                            .then(() => {
+                              getDesignNames().then(setDesignNames);
+                              setFormData({ ...formData, emplDesignNo: newDesign.trim() });
+                            })
+                            .catch((error) => {
+                              console.error('Error adding design:', error);
+                              alert('Failed to add design name');
+                            });
+                        }
+                      }}
+                      className="px-3 py-2.5 bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className={labelClass}>Color Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.colorName}
+                    onChange={(e) => setFormData({ ...formData, colorName: e.target.value })}
+                    placeholder="Enter color name"
+                    className={inputClass}
+                  />
+                </div>
+                <DropdownWithAdd
+                  label="Merchant"
+                  value={formData.merchant}
+                  onChange={(value) => setFormData({ ...formData, merchant: value })}
+                  options={MERCHANTS}
+                  customOptions={customMerchants}
+                  onAddCustom={addCustomMerchant}
+                  required
+                  placeholder="Select Merchant"
+                />
+                <div className="md:col-span-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className={labelClass}>Product Sizes *</label>
+                    <div className="flex border border-gray-300 rounded-lg overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setSizeUnit('cm')}
+                        className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                          sizeUnit === 'cm'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        cm
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSizeUnit('feet')}
+                        className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                          sizeUnit === 'feet'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        feet
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Selected sizes */}
+                  {selectedSizes.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {selectedSizes.map(size => (
+                        <span
+                          key={size}
+                          className="inline-flex items-center gap-1 px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full text-sm font-medium"
+                        >
+                          {size}
+                          <button
+                            type="button"
+                            onClick={() => removeSize(size)}
+                            className="hover:text-emerald-600"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Standard sizes as clickable tags */}
+                  <div className="flex flex-wrap gap-2 items-center">
+                    {(sizeUnit === 'cm' ? [...STANDARD_SIZES_CM, ...customSizesCm] : [...STANDARD_SIZES_FEET, ...customSizesFeet]).map(size => (
+                      <button
+                        key={size}
+                        type="button"
+                        onClick={() => toggleSize(size)}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                          selectedSizes.includes(size)
+                            ? 'bg-emerald-600 text-white border-emerald-600'
+                            : 'bg-white text-gray-700 border-gray-300 hover:border-emerald-400 hover:text-emerald-600'
+                        }`}
+                      >
+                        {size}
+                      </button>
+                    ))}
+
+                    {/* Add custom size button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newSize = prompt(`Enter custom size (${sizeUnit}):`);
+                        if (newSize && newSize.trim()) {
+                          addCustomSize(newSize.trim());
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-sm font-medium border border-dashed border-gray-400 text-gray-600 hover:border-emerald-500 hover:text-emerald-600 transition-colors flex items-center gap-1"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add Size
+                    </button>
+                  </div>
+
+                  {/* Hidden required input for form validation */}
+                  <input
+                    type="text"
+                    required
+                    value={formData.productSizes}
+                    onChange={() => {}}
+                    className="sr-only"
+                    tabIndex={-1}
+                  />
+                  {selectedSizes.length === 0 && (
+                    <p className="text-xs text-gray-500 mt-2">Click sizes to select, or add a custom size</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Basic Info */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Inspection Details</h2>
@@ -1099,184 +2026,310 @@ export function FinalInspectionForm() {
 
       {/* Order Info */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Order Information</h2>
+        <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          Order Information
+          {opsData && (
+            <span className="text-xs font-normal bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">
+              Auto-filled from OPS
+            </span>
+          )}
+        </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <CustomerDropdown
-            customerName={formData.customerName}
-            customers={customers}
-            onCustomerChange={handleCustomerChange}
-            onAddCustomer={handleAddCustomer}
-            required
-            loading={customersLoading}
-          />
-          <div>
-            <label className={labelClass}>Customer Code *</label>
-            <input
-              type="text"
-              required
-              value={formData.customerCode}
-              onChange={(e) => setFormData({ ...formData, customerCode: e.target.value })}
-              className={inputClass}
-              placeholder={customersLoading ? "Loading..." : "Auto-filled from customer"}
-              readOnly={!!formData.customerName && customers.some(c => c.name === formData.customerName)}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Customer PO No. *</label>
-            <input
-              type="text"
-              required
-              value={formData.customerPoNo}
-              onChange={(e) => setFormData({ ...formData, customerPoNo: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>OPS No. *</label>
-            <input
-              type="text"
-              required
-              value={formData.opsNo}
-              onChange={(e) => setFormData({ ...formData, opsNo: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <DropdownWithAdd
-            label="Buyer Design Name"
-            value={formData.buyerDesignName}
-            onChange={(value) => setFormData({ ...formData, buyerDesignName: value })}
-            options={[]}
-            customOptions={customBuyerDesigns}
-            onAddCustom={addCustomBuyerDesign}
-            required
-            placeholder="Select/Add Design"
-          />
-          <div>
-            <label className={labelClass}>EMPL Design No. *</label>
-            <input
-              type="text"
-              required
-              value={formData.emplDesignNo}
-              onChange={(e) => setFormData({ ...formData, emplDesignNo: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Color Name *</label>
-            <input
-              type="text"
-              required
-              value={formData.colorName}
-              onChange={(e) => setFormData({ ...formData, colorName: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <div className="md:col-span-2">
-            <div className="flex items-center justify-between mb-2">
-              <label className={labelClass}>Product Sizes *</label>
-              <div className="flex border border-gray-300 rounded-lg overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setSizeUnit('cm')}
-                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                    sizeUnit === 'cm'
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  cm
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSizeUnit('feet')}
-                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                    sizeUnit === 'feet'
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  feet
-                </button>
+          {opsData ? (
+            // Read-only customer info when loaded from OPS (except PO which is editable)
+            <>
+              <div>
+                <label className={labelClass}>Customer Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.customerName}
+                  className={`${inputClass} bg-emerald-50 border-emerald-300`}
+                  readOnly
+                />
               </div>
-            </div>
-
-            {/* Selected sizes */}
-            {selectedSizes.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-3">
-                {selectedSizes.map(size => (
-                  <span
-                    key={size}
-                    className="inline-flex items-center gap-1 px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full text-sm font-medium"
-                  >
-                    {size}
-                    <button
-                      type="button"
-                      onClick={() => removeSize(size)}
-                      className="hover:text-emerald-600"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </span>
-                ))}
+              <div>
+                <label className={labelClass}>Customer Code *</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.customerCode}
+                  className={`${inputClass} bg-emerald-50 border-emerald-300`}
+                  readOnly
+                />
               </div>
-            )}
+              <div>
+                <label className={labelClass}>Customer PO No. *</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.customerPoNo}
+                  onChange={(e) => setFormData({ ...formData, customerPoNo: e.target.value })}
+                  placeholder="Edit if needed"
+                  className={inputClass}
+                />
+              </div>
+            </>
+          ) : (
+            // Editable customer info when manual entry
+            <>
+              <CustomerDropdown
+                customerName={formData.customerName}
+                customers={customers}
+                onCustomerChange={handleCustomerChange}
+                onAddCustomer={handleAddCustomer}
+                required
+                loading={customersLoading}
+              />
+              <div>
+                <label className={labelClass}>Customer Code *</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.customerCode}
+                  onChange={(e) => setFormData({ ...formData, customerCode: e.target.value })}
+                  className={inputClass}
+                  placeholder={customersLoading ? "Loading..." : "Auto-filled from customer"}
+                  readOnly={!!formData.customerName && customers.some(c => c.name === formData.customerName)}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Customer PO No. *</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.customerPoNo}
+                  onChange={(e) => setFormData({ ...formData, customerPoNo: e.target.value })}
+                  className={inputClass}
+                />
+              </div>
+            </>
+          )}
+        </div>
+      </div>
 
-            {/* Standard sizes as clickable tags */}
-            <div className="flex flex-wrap gap-2 items-center">
-              {(sizeUnit === 'cm' ? [...STANDARD_SIZES_CM, ...customSizesCm] : [...STANDARD_SIZES_FEET, ...customSizesFeet]).map(size => (
-                <button
-                  key={size}
-                  type="button"
-                  onClick={() => toggleSize(size)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                    selectedSizes.includes(size)
-                      ? 'bg-emerald-600 text-white border-emerald-600'
-                      : 'bg-white text-gray-700 border-gray-300 hover:border-emerald-400 hover:text-emerald-600'
-                  }`}
-                >
-                  {size}
-                </button>
-              ))}
+      {/* Images Section - NEW */}
+      <div className="bg-white rounded-lg shadow-sm border p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <Camera className="w-5 h-5" />
+          Images
+        </h2>
 
-              {/* Add custom size button */}
+        {/* Stacked Images of Packed Goods */}
+        <div className="mb-6">
+          <label className={labelClass}>Stacked Images of Packed Goods</label>
+          {stackedGoodsPreview ? (
+            <div className="relative inline-block">
+              <img
+                src={stackedGoodsPreview}
+                alt="Stacked Goods"
+                className="w-full max-w-xs h-40 object-cover rounded-lg border"
+              />
               <button
                 type="button"
-                onClick={() => {
-                  const newSize = prompt(`Enter custom size (${sizeUnit}):`);
-                  if (newSize && newSize.trim()) {
-                    addCustomSize(newSize.trim());
-                  }
-                }}
-                className="px-3 py-1.5 rounded-lg text-sm font-medium border border-dashed border-gray-400 text-gray-600 hover:border-emerald-500 hover:text-emerald-600 transition-colors flex items-center gap-1"
+                onClick={() => handleStackedGoodsChange(null)}
+                className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full hover:bg-red-600"
               >
-                <Plus className="w-4 h-4" />
-                Add Size
+                <X size={14} />
               </button>
             </div>
+          ) : (
+            <label className="flex flex-col items-center justify-center w-full max-w-xs h-40 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+              <Camera className="w-10 h-10 text-gray-400" />
+              <span className="text-sm text-gray-500 mt-2">Upload Photo</span>
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => handleStackedGoodsChange(e.target.files?.[0] || null)}
+              />
+            </label>
+          )}
+        </div>
 
-            {/* Hidden required input for form validation */}
-            <input
-              type="text"
-              required
-              value={formData.productSizes}
-              onChange={() => {}}
-              className="sr-only"
-              tabIndex={-1}
-            />
-            {selectedSizes.length === 0 && (
-              <p className="text-xs text-gray-500 mt-2">Click sizes to select, or add a custom size</p>
-            )}
+        {/* Consumer Pieces */}
+        <div className="mb-6">
+          <label className={labelClass}>Packed Consumer Pieces</label>
+          <div className="flex flex-wrap gap-4">
+            {consumerPieces.map((piece, index) => (
+              <div key={index} className="w-40 border border-gray-200 rounded-lg p-3">
+                {/* Label Dropdown */}
+                <div className="mb-2">
+                  <div className="flex border border-gray-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500">
+                    <select
+                      value={piece.label}
+                      onChange={(e) => updateConsumerPiece(index, { label: e.target.value })}
+                      className="flex-1 px-2 py-1.5 text-sm border-0 bg-transparent focus:ring-0 focus:outline-none"
+                    >
+                      <option value="">Select label...</option>
+                      {[...CONSUMER_PIECE_LABELS, ...customConsumerLabels].map(label => (
+                        <option key={label} value={label}>{label}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newLabel = prompt('Enter new label:');
+                        if (newLabel && newLabel.trim()) {
+                          addCustomConsumerLabel(newLabel.trim());
+                          updateConsumerPiece(index, { label: newLabel.trim() });
+                        }
+                      }}
+                      className="px-2 py-1.5 border-l border-gray-300 text-emerald-600 hover:bg-emerald-50"
+                      title="Add custom label"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
+                </div>
+                {/* Photo Upload */}
+                {piece.preview ? (
+                  <div className="relative">
+                    <img
+                      src={piece.preview}
+                      alt={piece.label || 'Consumer Piece'}
+                      className="w-full h-28 object-cover rounded-lg"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleConsumerPiecePhoto(index, null)}
+                      className="absolute top-1 right-1 p-0.5 bg-red-500 text-white rounded-full"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
+                    <Camera className="w-6 h-6 text-gray-400" />
+                    <span className="text-xs text-gray-500 mt-1">Upload</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => handleConsumerPiecePhoto(index, e.target.files?.[0] || null)}
+                    />
+                  </label>
+                )}
+                {/* Remove button */}
+                <button
+                  type="button"
+                  onClick={() => removeConsumerPiece(index)}
+                  className="mt-2 w-full text-xs text-red-600 hover:text-red-700"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+            {/* Add More Button */}
+            <button
+              type="button"
+              onClick={addConsumerPiece}
+              className="w-40 h-48 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg hover:border-emerald-400 hover:bg-emerald-50 transition-colors"
+            >
+              <Plus className="w-8 h-8 text-gray-400" />
+              <span className="text-sm text-gray-500 mt-2">Add More</span>
+            </button>
           </div>
-          <DropdownWithAdd
-            label="Merchant"
-            value={formData.merchant}
-            onChange={(value) => setFormData({ ...formData, merchant: value })}
-            options={MERCHANTS}
-            customOptions={customMerchants}
-            onAddCustom={addCustomMerchant}
-            required
-            placeholder="Select Merchant"
-          />
+        </div>
+
+        {/* Unit Load Toggle */}
+        <div className="border-t border-gray-200 pt-4">
+          <label className="flex items-center gap-3 cursor-pointer mb-4">
+            <input
+              type="checkbox"
+              checked={unitLoadEnabled}
+              onChange={(e) => setUnitLoadEnabled(e.target.checked)}
+              className="w-5 h-5 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500"
+            />
+            <span className="text-sm font-medium text-gray-700">Unit Load Applicable</span>
+          </label>
+
+          {/* Unit Load Photos (only shown when enabled) */}
+          {unitLoadEnabled && (
+            <div className="ml-8">
+              <label className={labelClass}>Unit Load Photos</label>
+              <div className="flex flex-wrap gap-4">
+                {unitLoadPhotos.map((photo, index) => (
+                  <div key={index} className="w-40 border border-gray-200 rounded-lg p-3">
+                    {/* Label Dropdown */}
+                    <div className="mb-2">
+                      <div className="flex border border-gray-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500">
+                        <select
+                          value={photo.label}
+                          onChange={(e) => updateUnitLoadPhoto(index, { label: e.target.value })}
+                          className="flex-1 px-2 py-1.5 text-sm border-0 bg-transparent focus:ring-0 focus:outline-none"
+                        >
+                          <option value="">Select label...</option>
+                          {[...UNIT_LOAD_LABELS, ...customUnitLoadLabels].map(label => (
+                            <option key={label} value={label}>{label}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newLabel = prompt('Enter new label:');
+                            if (newLabel && newLabel.trim()) {
+                              addCustomUnitLoadLabel(newLabel.trim());
+                              updateUnitLoadPhoto(index, { label: newLabel.trim() });
+                            }
+                          }}
+                          className="px-2 py-1.5 border-l border-gray-300 text-emerald-600 hover:bg-emerald-50"
+                          title="Add custom label"
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    {/* Photo Upload */}
+                    {photo.preview ? (
+                      <div className="relative">
+                        <img
+                          src={photo.preview}
+                          alt={photo.label || 'Unit Load'}
+                          className="w-full h-28 object-cover rounded-lg"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleUnitLoadPhotoChange(index, null)}
+                          className="absolute top-1 right-1 p-0.5 bg-red-500 text-white rounded-full"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
+                        <Camera className="w-6 h-6 text-gray-400" />
+                        <span className="text-xs text-gray-500 mt-1">Upload</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => handleUnitLoadPhotoChange(index, e.target.files?.[0] || null)}
+                        />
+                      </label>
+                    )}
+                    {/* Remove button */}
+                    <button
+                      type="button"
+                      onClick={() => removeUnitLoadPhoto(index)}
+                      className="mt-2 w-full text-xs text-red-600 hover:text-red-700"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                {/* Add More Button */}
+                <button
+                  type="button"
+                  onClick={addUnitLoadPhoto}
+                  className="w-40 h-48 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg hover:border-emerald-400 hover:bg-emerald-50 transition-colors"
+                >
+                  <Plus className="w-8 h-8 text-gray-400" />
+                  <span className="text-sm text-gray-500 mt-2">Add More</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

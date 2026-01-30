@@ -1,49 +1,331 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, addDoc, query, orderBy, Timestamp } from 'firebase/firestore';
+import {
+  getFirestore,
+  collection,
+  addDoc,
+  getDocs,
+  query,
+  orderBy,
+  where,
+  serverTimestamp,
+} from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import type { Customer } from '../types';
 
+// OPS Order Item interface
+export interface OpsOrderItem {
+  id: string;
+  articleName: string;
+  size?: string;
+  color?: string;
+  quality?: string;
+  pcs: number;
+  sqm: number;
+  imageUrl?: string;
+}
+
+// OPS Order details interface
+export interface OpsOrder {
+  id: string;
+  salesNo: string;           // OPS number
+  poNumber: string;          // Customer PO
+  buyerName: string;
+  buyerCode: string;
+  merchantCode: string;
+  companyCode: 'EMPL' | 'EHI';
+  orderType: string;
+  shipDate: string;
+  totalPcs: number;
+  totalSqm: number;
+  status: string;
+  items: OpsOrderItem[];
+}
+
+// Firebase configuration for easternmillscom project
 const firebaseConfig = {
-  apiKey: "AIzaSyBSnzCBh-nhQs2nNuPpV_xpRp29FyUyHuc",
-  authDomain: "easternmillscom.firebaseapp.com",
-  projectId: "easternmillscom",
-  storageBucket: "easternmillscom.firebasestorage.app",
-  messagingSenderId: "249673281284",
-  appId: "1:249673281284:web:2ca71b5a1d41936d0d2a51"
+  apiKey: 'AIzaSyDqFKIL0SdH0pR0rVYKRTlO8snL0jTK4cA',
+  authDomain: 'easternmillscom.firebaseapp.com',
+  projectId: 'easternmillscom',
+  storageBucket: 'easternmillscom.firebasestorage.app',
+  messagingSenderId: '104363102649904556055',
+  appId: '1:104363102649904556055:web:final-inspection',
 };
 
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 
-// Customers collection (synced with TED forms)
-export const customersCollection = collection(db, 'customers');
+// ============================================
+// Customer/Buyer Operations
+// Using shared 'buyers' collection (same as Sample Bazar, Orders, etc.)
+// Function names kept as getCustomers/addCustomer for backward compatibility
+// ============================================
 
-// Get all customers from Firestore
+const BUYERS_COLLECTION = 'buyers';
+
+/**
+ * Get all customers/buyers from Firestore (shared buyers collection)
+ * @returns Array of customers with name and code
+ */
 export async function getCustomers(): Promise<Customer[]> {
   try {
-    const q = query(customersCollection, orderBy('name'));
+    const buyersRef = collection(db, BUYERS_COLLECTION);
+    const q = query(buyersRef, orderBy('name', 'asc'));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({
-      name: doc.data().name,
-      code: doc.data().code
-    }));
+
+    return snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        name: data.name,
+        code: data.code,
+      } as Customer;
+    });
   } catch (error) {
-    console.error('Error fetching customers:', error);
+    console.error('Error fetching customers from shared buyers collection:', error);
+    throw error;
+  }
+}
+
+/**
+ * Add a new customer/buyer to the shared buyers collection
+ * @param customer Customer with name and code
+ * @returns Document ID of the new buyer
+ */
+export async function addCustomer(customer: Customer): Promise<string> {
+  try {
+    const buyersRef = collection(db, BUYERS_COLLECTION);
+    const docRef = await addDoc(buyersRef, {
+      name: customer.name,
+      code: customer.code,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return docRef.id;
+  } catch (error) {
+    console.error('Error adding customer to shared buyers collection:', error);
+    throw error;
+  }
+}
+
+// ============================================
+// Shared Design Names (from empl_design_name collection)
+// ============================================
+
+export interface DesignName {
+  id: string;
+  designName: string;
+  displayName?: string;
+  category?: string;
+  construction?: string;
+  isActive?: boolean;
+}
+
+export async function getDesignNames(): Promise<DesignName[]> {
+  try {
+    const designsRef = collection(db, 'empl_design_name');
+    const q = query(designsRef, orderBy('designName', 'asc'));
+    const snapshot = await getDocs(q);
+
+    return snapshot.docs
+      .map(doc => ({
+        id: doc.id,
+        designName: doc.data().designName,
+        displayName: doc.data().displayName,
+        category: doc.data().category,
+        construction: doc.data().construction,
+        isActive: doc.data().isActive ?? true,
+      }))
+      .filter(d => d.designName && d.isActive !== false);
+  } catch (error) {
+    console.error('Error fetching design names:', error);
     return [];
   }
 }
 
-// Add a new customer to Firestore
-export async function addCustomer(customer: Customer): Promise<void> {
+export async function addDesignName(designName: string): Promise<string> {
   try {
-    await addDoc(customersCollection, {
-      name: customer.name,
-      code: customer.code,
-      createdAt: Timestamp.now()
+    const designsRef = collection(db, 'empl_design_name');
+    const docRef = await addDoc(designsRef, {
+      designName: designName.trim(),
+      displayName: designName.trim(),
+      isActive: true,
+      sources: ['Final Inspection'],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
+    return docRef.id;
   } catch (error) {
-    console.error('Error adding customer:', error);
+    console.error('Error adding design name:', error);
     throw error;
   }
 }
+
+// ============================================
+// Shared Carpet Numbers (from carpet_no collection)
+// ============================================
+
+export interface CarpetNumber {
+  id: string;
+  carpetNo: string;
+  designName?: string;
+  opsNo?: string;
+  productType?: 'rug' | 'broadloom';
+  status?: string;
+}
+
+export async function getCarpetNumbers(productType?: 'rug' | 'broadloom'): Promise<CarpetNumber[]> {
+  try {
+    const carpetsRef = collection(db, 'carpet_no');
+    const q = query(carpetsRef, orderBy('carpetNo', 'asc'));
+    const snapshot = await getDocs(q);
+
+    return snapshot.docs
+      .map(doc => ({
+        id: doc.id,
+        carpetNo: doc.data().carpetNo,
+        designName: doc.data().designName,
+        opsNo: doc.data().opsNo,
+        productType: doc.data().productType,
+        status: doc.data().status,
+      }))
+      .filter(c => {
+        if (!c.carpetNo) return false;
+        if (productType && c.productType !== productType) return false;
+        return true;
+      });
+  } catch (error) {
+    console.error('Error fetching carpet numbers:', error);
+    return [];
+  }
+}
+
+// ============================================
+// OPS Order Lookup (from orders/data/orders collection)
+// ============================================
+
+/**
+ * Normalize OPS number to handle different formats
+ * e.g., "EM-25-747", "25-747", "OPS-25747", "EM25747" -> normalized for search
+ */
+function normalizeOpsNo(opsNo: string): string {
+  // Remove common prefixes and normalize
+  return opsNo
+    .toUpperCase()
+    .replace(/^(OPS[-\s]?|EM[-\s]?)/i, '')
+    .replace(/[-\s]/g, '')
+    .trim();
+}
+
+/**
+ * Get list of all OPS numbers for dropdown
+ * Returns recent orders sorted by date
+ */
+export async function getOpsList(): Promise<Array<{ salesNo: string; buyerName: string; buyerCode: string; poNumber: string; totalPcs: number; status: string }>> {
+  try {
+    const ordersRef = collection(db, 'orders', 'data', 'orders');
+    const q = query(ordersRef, orderBy('createdAt', 'desc'));
+    const snapshot = await getDocs(q);
+
+    return snapshot.docs
+      .map(doc => {
+        const data = doc.data();
+        return {
+          salesNo: (data.salesNo as string) || '',
+          buyerName: (data.buyerName as string) || '',
+          buyerCode: (data.buyerCode as string) || (data.customerCode as string) || '',
+          poNumber: (data.poNumber as string) || (data.poNo as string) || '',
+          totalPcs: (data.totalPcs as number) || 0,
+          status: (data.status as string) || '',
+        };
+      })
+      .filter(o => o.salesNo); // Only include orders with OPS numbers
+  } catch (error) {
+    console.error('Error fetching OPS list:', error);
+    return [];
+  }
+}
+
+/**
+ * Get OPS order details by OPS number
+ * Searches orders/data/orders by salesNo field
+ */
+export async function getOpsByNumber(opsNo: string): Promise<OpsOrder | null> {
+  if (!opsNo || opsNo.trim().length < 2) return null;
+
+  try {
+    const ordersRef = collection(db, 'orders', 'data', 'orders');
+    const inputNormalized = normalizeOpsNo(opsNo);
+
+    // First try exact match on salesNo
+    let q = query(ordersRef, where('salesNo', '==', opsNo.trim()));
+    let snapshot = await getDocs(q);
+
+    // If no exact match, try common formats
+    if (snapshot.empty) {
+      const formats = [
+        opsNo.trim(),
+        `OPS-${inputNormalized}`,
+        `EM-${inputNormalized}`,
+        inputNormalized,
+      ];
+
+      for (const format of formats) {
+        q = query(ordersRef, where('salesNo', '==', format));
+        snapshot = await getDocs(q);
+        if (!snapshot.empty) break;
+      }
+    }
+
+    if (snapshot.empty) {
+      // Last resort: get all orders and search (inefficient but handles edge cases)
+      const allOrdersSnapshot = await getDocs(ordersRef);
+      const normalizedInput = normalizeOpsNo(opsNo);
+
+      for (const doc of allOrdersSnapshot.docs) {
+        const data = doc.data();
+        if (data.salesNo && normalizeOpsNo(data.salesNo) === normalizedInput) {
+          return mapOrderToOps(doc.id, data);
+        }
+      }
+      return null;
+    }
+
+    const doc = snapshot.docs[0];
+    return mapOrderToOps(doc.id, doc.data());
+  } catch (error) {
+    console.error('Error fetching OPS order:', error);
+    return null;
+  }
+}
+
+function mapOrderToOps(docId: string, data: Record<string, unknown>): OpsOrder {
+  const items = (data.items as Array<Record<string, unknown>> || []).map((item, idx) => ({
+    id: (item.id as string) || `item-${idx}`,
+    articleName: (item.articleName as string) || '',
+    size: item.size as string | undefined,
+    color: item.color as string | undefined,
+    quality: item.quality as string | undefined,
+    pcs: (item.pcs as number) || (item.qty as number) || 0,
+    sqm: (item.sqm as number) || 0,
+    imageUrl: item.imageUrl as string | undefined,
+  }));
+
+  return {
+    id: docId,
+    salesNo: (data.salesNo as string) || '',
+    poNumber: (data.poNumber as string) || (data.poNo as string) || '',
+    buyerName: (data.buyerName as string) || '',
+    buyerCode: (data.buyerCode as string) || (data.customerCode as string) || '',
+    merchantCode: (data.merchantCode as string) || '',
+    companyCode: ((data.companyCode as string) || 'EMPL') as 'EMPL' | 'EHI',
+    orderType: (data.orderType as string) || 'production',
+    shipDate: (data.shipDate as string) || '',
+    totalPcs: (data.totalPcs as number) || items.reduce((sum, i) => sum + i.pcs, 0),
+    totalSqm: (data.totalSqm as number) || items.reduce((sum, i) => sum + i.sqm, 0),
+    status: (data.status as string) || '',
+    items,
+  };
+}
+
+export default app;

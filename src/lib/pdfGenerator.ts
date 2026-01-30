@@ -170,8 +170,72 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
   addRow([['Inspection Date', inspection.inspectionDate], ['Inspector', inspection.qcInspectorName]]);
   addRow([['Customer Code', inspection.customerCode], ['Customer PO', inspection.customerPoNo]]);
   addRow([['OPS No.', inspection.opsNo], ['Merchant', inspection.merchant]]);
-  addRow([['Buyer Design', inspection.buyerDesignName], ['EMPL Design', inspection.emplDesignNo]]);
-  addRow([['Color', inspection.colorName], ['Product Sizes', inspection.productSizes]]);
+  addRow([['EMPL Design', inspection.emplDesignNo], ['Color', inspection.colorName]]);
+  addRow([['Product Sizes', inspection.productSizes], ['Buyer Design', inspection.buyerDesignName || '-']]);
+
+  y += 4;
+
+  // Inspected Articles Section (if available)
+  if (inspection.inspectedArticles && inspection.inspectedArticles.length > 0) {
+    addSection('Inspected Articles');
+
+    // Table header
+    checkNewPage(20);
+    doc.setFillColor(243, 244, 246);
+    doc.rect(15, y - 2, pageWidth - 30, 8, 'F');
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...darkGray);
+
+    const articleColW = (pageWidth - 30) / 5;
+    doc.text('Article Name', 18, y + 3);
+    doc.text('Size', 18 + articleColW, y + 3);
+    doc.text('Color', 18 + articleColW * 2, y + 3);
+    doc.text('Total Pcs', 18 + articleColW * 3, y + 3);
+    doc.text('Inspected', 18 + articleColW * 4, y + 3);
+    y += 10;
+
+    // Article rows
+    inspection.inspectedArticles.forEach((article) => {
+      checkNewPage();
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...darkGray);
+      doc.setFontSize(8);
+
+      // Truncate article name if needed
+      let articleName = article.articleName || '-';
+      const maxArticleWidth = articleColW - 5;
+      while (doc.getTextWidth(articleName) > maxArticleWidth && articleName.length > 3) {
+        articleName = articleName.slice(0, -1);
+      }
+      if (articleName !== article.articleName && article.articleName) articleName += '...';
+
+      doc.text(articleName, 18, y);
+      doc.text(article.size || '-', 18 + articleColW, y);
+      doc.text(article.color || '-', 18 + articleColW * 2, y);
+      doc.text(String(article.pcs || 0), 18 + articleColW * 3, y);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...primaryColor);
+      doc.text(String(article.inspectedQty || article.pcs || 0), 18 + articleColW * 4, y);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...darkGray);
+      y += 8;
+    });
+
+    // Total row
+    checkNewPage();
+    const totalPcs = inspection.inspectedArticles.reduce((sum, a) => sum + (a.pcs || 0), 0);
+    const totalInspected = inspection.inspectedArticles.reduce((sum, a) => sum + (a.inspectedQty || a.pcs || 0), 0);
+    doc.setFillColor(243, 244, 246);
+    doc.rect(15, y - 2, pageWidth - 30, 8, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.text('TOTAL', 18, y + 3);
+    doc.text(String(totalPcs), 18 + articleColW * 3, y + 3);
+    doc.setTextColor(...primaryColor);
+    doc.text(String(totalInspected), 18 + articleColW * 4, y + 3);
+    y += 12;
+  }
 
   y += 4;
 
@@ -466,15 +530,34 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
   // Add all photos
   await addImagePage(inspection.approvedSamplePhoto, 'Approved Sample');
   await addImagePage(inspection.idPhoto, 'ID Photo');
+  // Red Seal Photos
   await addImagePage(inspection.redSealFrontPhoto, 'Red Seal - Front');
-  await addImagePage(inspection.redSealSidePhoto, 'Red Seal - Side');
-  await addImagePage(inspection.backPhoto, 'Back Photo');
+  await addImagePage(inspection.redSealBackPhoto, 'Red Seal - Back');
+  await addImagePage(inspection.redSealCloseUpPhoto, 'Close-up with Red Seal');
+  await addImagePage(inspection.redSealProductFront, 'Front Photo with Red Seal');
+  await addImagePage(inspection.redSealProductBack, 'Back Photo with Red Seal');
+  // Other standard photos
   await addImagePage(inspection.labelPhoto, 'Label Photo');
   await addImagePage(inspection.moisturePhoto, 'Moisture Photo');
   await addImagePage(inspection.sizeFrontPhoto, 'Size - Front');
   await addImagePage(inspection.sizeSidePhoto, 'Size - Side');
   await addImagePage(inspection.inspectedSamplesPhoto, 'Inspected Samples');
   await addImagePage(inspection.metalCheckingPhoto, 'Metal Checking');
+
+  // New Images section photos
+  if (inspection.stackedGoodsPhoto) {
+    await addImagePage(inspection.stackedGoodsPhoto, 'Stacked Images of Packed Goods');
+  }
+  if (inspection.consumerPieces && inspection.consumerPieces.length > 0) {
+    for (const piece of inspection.consumerPieces) {
+      await addImagePage(piece.url, `Consumer Piece - ${piece.label}`);
+    }
+  }
+  if (inspection.unitLoadEnabled && inspection.unitLoadPhotos && inspection.unitLoadPhotos.length > 0) {
+    for (const photo of inspection.unitLoadPhotos) {
+      await addImagePage(photo.url, `Unit Load - ${photo.label}`);
+    }
+  }
 
   for (let i = 0; i < inspection.otherPhotos.length; i++) {
     await addImagePage(inspection.otherPhotos[i], `Other Photo ${i + 1}`);
@@ -484,7 +567,7 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
   if (inspection.notOkPhotos && inspection.notOkPhotos.length > 0) {
     for (const notOkPhoto of inspection.notOkPhotos) {
       // Find the field label from OK_NOT_OK_FIELDS
-      const fieldInfo = OK_NOT_OK_FIELDS.find(f => f.key === notOkPhoto.field);
+      const fieldInfo = OK_NOT_OK_FIELDS.find((f: { key: string }) => f.key === notOkPhoto.field);
       const fieldLabel = fieldInfo ? fieldInfo.label : notOkPhoto.field;
       await addImagePage(notOkPhoto.photo, `NOT OK - ${fieldLabel}`);
     }

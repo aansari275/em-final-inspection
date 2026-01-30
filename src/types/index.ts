@@ -4,6 +4,45 @@ export type YesNo = 'Yes' | 'No';
 export type PackingType = 'Assorted' | 'Solid';
 export type SizeUnit = 'cm' | 'feet';
 
+// Labeled photo for Images section (Consumer Pieces & Unit Load)
+export interface LabeledPhoto {
+  label: string;
+  file?: File;
+  preview?: string;
+  url?: string; // For saved photos from Firebase
+}
+
+// Selected article for inspection (from OPS items)
+export interface SelectedArticle {
+  id: string;
+  articleName: string;
+  size?: string;
+  color?: string;
+  quality?: string;
+  pcs: number;
+  sqm: number;
+  selected: boolean;
+  inspectedQty?: number; // How many pieces to inspect from this article
+}
+
+// Default dropdown options for Consumer Pieces labels
+export const CONSUMER_PIECE_LABELS = [
+  'Consumer Label',
+  'Care Label',
+  'SKU Sticker',
+  'UPC Barcode',
+  'Packaging Front',
+  'Packaging Back',
+] as const;
+
+// Default dropdown options for Unit Load labels
+export const UNIT_LOAD_LABELS = [
+  'Unit Load Label',
+  'Pallet Marking',
+  'Outer Carton',
+  'Stretch Wrap',
+] as const;
+
 // Customer with code (synced from TED forms via Firestore)
 export interface Customer {
   name: string;
@@ -39,6 +78,8 @@ export const CUSTOM_OPTIONS_KEYS = {
   customSizesCm: 'em_custom_sizes_cm',
   customSizesFeet: 'em_custom_sizes_feet',
   aqlLevels: 'em_custom_aql_levels',
+  consumerPieceLabels: 'em_custom_consumer_piece_labels',
+  unitLoadLabels: 'em_custom_unit_load_labels',
 } as const;
 
 // Standard product sizes in cm
@@ -175,8 +216,10 @@ export interface FinalInspection {
   approvedSamplePhoto: string;
   idPhoto: string;
   redSealFrontPhoto: string;
-  redSealSidePhoto: string;
-  backPhoto: string;
+  redSealBackPhoto: string;
+  redSealCloseUpPhoto: string;
+  redSealProductFront: string;
+  redSealProductBack: string;
   labelPhoto: string;
   moisturePhoto: string;
   sizeFrontPhoto: string;
@@ -184,6 +227,23 @@ export interface FinalInspection {
   inspectedSamplesPhoto: string;
   metalCheckingPhoto: string;
   otherPhotos: string[];
+
+  // New Images section
+  stackedGoodsPhoto?: string;
+  consumerPieces?: Array<{ label: string; url: string }>;
+  unitLoadEnabled?: boolean;
+  unitLoadPhotos?: Array<{ label: string; url: string }>;
+
+  // Inspected articles from OPS (selected during form entry)
+  inspectedArticles?: Array<{
+    articleName: string;
+    size?: string;
+    color?: string;
+    quality?: string;
+    pcs: number;
+    sqm: number;
+    inspectedQty: number;
+  }>;
 
   // NOT OK photos (photos for fields marked as NOT OK)
   notOkPhotos: NotOkPhoto[];
@@ -267,9 +327,13 @@ export const DEFECT_CODES = [
 export const PHOTO_TYPES = [
   { key: 'approvedSamplePhoto', label: 'Approved Sample Photo' },
   { key: 'idPhoto', label: 'ID Photo' },
-  { key: 'redSealFrontPhoto', label: 'Red Seal Front Photo' },
-  { key: 'redSealSidePhoto', label: 'Red Seal Side Photo' },
-  { key: 'backPhoto', label: 'Back Photo' },
+  // Red Seal Photos section
+  { key: 'redSealFrontPhoto', label: 'Red Seal - Front' },
+  { key: 'redSealBackPhoto', label: 'Red Seal - Back' },
+  { key: 'redSealCloseUpPhoto', label: 'Close-up with Red Seal' },
+  { key: 'redSealProductFront', label: 'Front Photo with Red Seal' },
+  { key: 'redSealProductBack', label: 'Back Photo with Red Seal' },
+  // Other photos
   { key: 'labelPhoto', label: 'Label Photo' },
   { key: 'moisturePhoto', label: 'Moisture Photo' },
   { key: 'sizeFrontPhoto', label: 'Size Front Photo' },
