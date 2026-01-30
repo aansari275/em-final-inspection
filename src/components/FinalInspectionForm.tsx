@@ -24,7 +24,8 @@ import {
   LabeledPhoto,
   CONSUMER_PIECE_LABELS,
   UNIT_LOAD_LABELS,
-  SelectedArticle
+  SelectedArticle,
+  COMPANY_NAMES
 } from '../types';
 import { Loader2, Upload, X, Camera, CheckCircle2, XCircle, Plus, Save, Search, Package, AlertCircle, ChevronDown, Calculator, Info } from 'lucide-react';
 
@@ -1405,11 +1406,12 @@ export function FinalInspectionForm() {
 
         const resultColor = inspection.inspectionResult === 'PASS' ? '#22c55e' : '#ef4444';
         const resultBg = inspection.inspectionResult === 'PASS' ? '#dcfce7' : '#fee2e2';
+        const companyFullName = COMPANY_NAMES[inspection.company] || 'Eastern Mills';
 
         const emailHtml = `
           <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
             <div style="background: #059669; color: white; padding: 20px; text-align: center;">
-              <h1 style="margin: 0;">Eastern Mills</h1>
+              <h1 style="margin: 0;">${companyFullName}</h1>
               <p style="margin: 5px 0 0;">Final Inspection Report</p>
             </div>
 
@@ -1511,7 +1513,7 @@ export function FinalInspectionForm() {
             </div>
 
             <div style="background: #f3f4f6; padding: 15px; text-align: center; color: #6b7280; font-size: 12px;">
-              <p>Eastern Mills QC System - Final Inspection Report</p>
+              <p>${companyFullName} - Final Inspection Report</p>
             </div>
           </div>
         `;
@@ -1644,6 +1646,62 @@ export function FinalInspectionForm() {
           </button>
         </div>
       )}
+
+      {/* Company Selection - Required */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">Company Selection *</h2>
+        <div className="flex gap-4">
+          <label
+            className={`flex-1 flex items-center justify-center gap-3 p-4 border-2 rounded-xl cursor-pointer transition-all ${
+              formData.company === 'EHI'
+                ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                : 'border-gray-200 hover:border-gray-300 text-gray-600'
+            }`}
+          >
+            <input
+              type="radio"
+              name="company"
+              value="EHI"
+              checked={formData.company === 'EHI'}
+              onChange={(e) => setFormData({
+                ...formData,
+                company: e.target.value as 'EHI' | 'EMPL',
+                documentNo: e.target.value === 'EHI' ? 'EHI/IP/01' : 'EMPL/IP/01'
+              })}
+              className="sr-only"
+              required
+            />
+            <div className="text-center">
+              <p className="font-bold text-lg">EHI</p>
+              <p className="text-sm opacity-75">Eastern Home Industries</p>
+            </div>
+          </label>
+          <label
+            className={`flex-1 flex items-center justify-center gap-3 p-4 border-2 rounded-xl cursor-pointer transition-all ${
+              formData.company === 'EMPL'
+                ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                : 'border-gray-200 hover:border-gray-300 text-gray-600'
+            }`}
+          >
+            <input
+              type="radio"
+              name="company"
+              value="EMPL"
+              checked={formData.company === 'EMPL'}
+              onChange={(e) => setFormData({
+                ...formData,
+                company: e.target.value as 'EHI' | 'EMPL',
+                documentNo: e.target.value === 'EHI' ? 'EHI/IP/01' : 'EMPL/IP/01'
+              })}
+              className="sr-only"
+            />
+            <div className="text-center">
+              <p className="font-bold text-lg">EMPL</p>
+              <p className="text-sm opacity-75">Eastern Mills Pvt Ltd</p>
+            </div>
+          </label>
+        </div>
+      </div>
 
       {/* OPS Lookup - Primary Entry */}
       <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg shadow-sm border border-emerald-200 p-6">

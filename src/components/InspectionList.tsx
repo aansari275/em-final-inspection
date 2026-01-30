@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { collection, query, orderBy, getDocs, deleteDoc, doc } from 'firebase/firestore';
 import { db, getBuyerMerchantEmails } from '../lib/firebase';
-import { FinalInspection, COMPANY_NAMES } from '../types';
+import { FinalInspection, COMPANY_NAMES, Company } from '../types';
 import { generateFinalInspectionPDF } from '../lib/pdfGenerator';
 import { emailSettingsService } from '../lib/emailSettingsService';
 import { Trash2, Eye, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle, Download, Mail, FileText } from 'lucide-react';
@@ -101,10 +101,11 @@ export function InspectionList() {
       const pdfBase64 = await generateFinalInspectionPDF(inspection);
 
       const resultColor = inspection.inspectionResult === 'PASS' ? '#22c55e' : '#ef4444';
+      const companyFullName = COMPANY_NAMES[inspection.company as Company] || 'Eastern Mills';
       const emailHtml = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 20px; text-align: center;">
-            <h1 style="color: white; margin: 0;">Eastern Mills</h1>
+            <h1 style="color: white; margin: 0;">${companyFullName}</h1>
             <p style="color: rgba(255,255,255,0.9); margin: 5px 0 0 0;">Final Inspection Report</p>
           </div>
 
@@ -154,7 +155,7 @@ export function InspectionList() {
           </div>
 
           <div style="padding: 15px; text-align: center; color: #6b7280; font-size: 12px;">
-            <p>This is an automated email from Eastern Mills QC System</p>
+            <p>This is an automated email from ${companyFullName}</p>
           </div>
         </div>
       `;
