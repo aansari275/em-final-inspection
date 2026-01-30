@@ -67,10 +67,17 @@ Main entry point for the form:
   - Unit Load Label, Pallet Marking, Outer Carton, Stretch Wrap
   - Custom labels can be added
 
-### 6. Quantities & Sampling
+### 6. Quantities & Sampling (AQL Z1.4-2008)
 - Total Order Qty, Inspected Lot Qty
 - AQL Level (0.65, 1.0, 1.5, 2.5, 4.0, 6.5)
-- Sample Size, Accepted Qty, Rejected Qty
+- **AQL Auto-Calculation Panel:**
+  - Code Letter (auto-calculated from lot size)
+  - Sample Size (auto-filled from Z1.4 table)
+  - Accept/Reject thresholds
+  - Arrow handling when sample size changes
+- Sample Size (editable), Accepted Qty, Rejected Qty
+- **Auto PASS/FAIL determination** based on rejected qty vs reject threshold
+- Inspector override capability for auto-determined results
 
 ### 7. Product Quality Checks
 - Approved Sample Available (Yes/No)
@@ -151,6 +158,26 @@ All OK/NOT OK checks:
 - Manual save button
 - Draft restoration on page load
 
+### AQL Z1.4-2008 Auto-Calculation
+Implements ANSI/ASQ Z1.4-2008 standard for acceptance sampling:
+- **Default Level:** General Inspection Level II
+- **Auto-calculates on lot size entry:**
+  - Code letter from lot size ranges
+  - Sample size from Z1.4 tables
+  - Accept/Reject thresholds for selected AQL
+- **Arrow handling:** Automatically uses larger sample when needed
+- **Auto PASS/FAIL:** Determines result based on rejected qty
+- **Inspector override:** Can manually override auto-determined result
+- **Saved fields:** codeLetter, calculatedSampleSize, acceptNumber, rejectNumber, effectiveCodeLetter, isAutoResult, resultOverridden
+
+**Verification Examples:**
+| Lot Size | AQL | Code | Sample | Accept | Reject |
+|----------|-----|------|--------|--------|--------|
+| 100 | 2.5 | F | 20 | 1 | 2 |
+| 200 | 2.5 | G | 32 | 1 | 2 |
+| 500 | 1.5 | H | 50 | 1 | 2 |
+| 5000 | 4.0 | L | 200 | 10 | 11 |
+
 ---
 
 ## Defect Codes
@@ -184,14 +211,16 @@ All OK/NOT OK checks:
 ```
 src/
 ├── components/
-│   ├── FinalInspectionForm.tsx  # Main form (~2800 lines)
+│   ├── FinalInspectionForm.tsx  # Main form (~3000 lines)
 │   ├── InspectionList.tsx       # History view
 │   ├── Header.tsx               # Navigation
 │   └── EmailSettings.tsx        # Email config
 ├── lib/
 │   ├── firebase.ts              # Firebase config + OPS lookup
-│   ├── pdfGenerator.ts          # PDF generation
-│   └── emailSettingsService.ts  # Email settings
+│   ├── pdfGenerator.ts          # PDF generation with AQL details
+│   ├── emailSettingsService.ts  # Email settings
+│   ├── aqlTables.ts             # Z1.4-2008 lookup tables
+│   └── aqlCalculator.ts         # AQL calculation utilities
 └── types/
     └── index.ts                 # TypeScript types & constants
 ```
