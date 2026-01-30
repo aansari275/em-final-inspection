@@ -1,12 +1,42 @@
 const nodemailer = require('nodemailer');
 
 exports.handler = async (event) => {
+  // Add CORS headers
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Content-Type': 'application/json'
+  };
+
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers, body: '' };
+  }
+
   if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: 'Method Not Allowed' };
+    return { statusCode: 405, headers, body: JSON.stringify({ success: false, error: 'Method Not Allowed' }) };
   }
 
   try {
     const { to, subject, html, pdfBase64, pdfFilename } = JSON.parse(event.body);
+
+    // Validate recipients
+    const recipients = Array.isArray(to) ? to.filter(email => email && email.trim()) : (to ? [to] : []);
+
+    if (recipients.length === 0) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ success: false, error: 'No valid email recipients provided. Configure recipients in Settings.' })
+      };
+    }
+
+    if (!subject) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ success: false, error: 'Email subject is required' })
+      };
+    }
 
     const transporter = nodemailer.createTransport({
       service: 'gmail',
@@ -18,7 +48,7 @@ exports.handler = async (event) => {
 
     const mailOptions = {
       from: '"Eastern Mills QC" <automations@easternmills.com>',
-      to: Array.isArray(to) ? to.join(', ') : to,
+      to: recipients.join(', '),
       subject: subject,
       html: html,
       attachments: pdfBase64 ? [{
@@ -32,12 +62,14 @@ exports.handler = async (event) => {
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ success: true, message: 'Email sent successfully' })
+      headers,
+      body: JSON.stringify({ success: true, message: `Email sent to ${recipients.length} recipient(s)` })
     };
   } catch (error) {
     console.error('Email error:', error);
     return {
       statusCode: 500,
+      headers,
       body: JSON.stringify({ success: false, error: error.message })
     };
   }

@@ -1,7 +1,11 @@
 import { Link, useLocation } from 'react-router-dom';
-import { ClipboardCheck, List, Settings } from 'lucide-react';
+import { ClipboardCheck, List, Settings, LogOut } from 'lucide-react';
 
-export function Header() {
+interface HeaderProps {
+  onLogout?: () => void;
+}
+
+export function Header({ onLogout }: HeaderProps) {
   const location = useLocation();
 
   const navItems = [
@@ -18,7 +22,7 @@ export function Header() {
             <h1 className="text-xl font-bold text-gray-900">Eastern Mills</h1>
             <p className="text-sm text-gray-500">Final Inspection Report</p>
           </div>
-          <nav className="flex gap-1">
+          <nav className="flex gap-1 items-center">
             {navItems.map(({ path, icon: Icon, label }) => (
               <Link
                 key={path}
@@ -33,6 +37,16 @@ export function Header() {
                 <span className="hidden sm:inline">{label}</span>
               </Link>
             ))}
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-red-50 hover:text-red-600 transition-colors ml-2"
+                title="Sign Out"
+              >
+                <LogOut size={18} />
+                <span className="hidden sm:inline">Sign Out</span>
+              </button>
+            )}
           </nav>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { collection, query, orderBy, getDocs, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, getBuyerMerchantEmails } from '../lib/firebase';
 import { FinalInspection, COMPANY_NAMES } from '../types';
 import { generateFinalInspectionPDF } from '../lib/pdfGenerator';
 import { emailSettingsService } from '../lib/emailSettingsService';
@@ -77,14 +77,27 @@ export function InspectionList() {
   };
 
   const handleResendEmail = async (inspection: FinalInspection & { id: string }) => {
-    const recipients = emailSettingsService.getRecipients();
-    if (recipients.length === 0) {
-      alert('No email recipients configured. Please go to Settings to add recipients.');
-      return;
-    }
-
     setSendingEmail(inspection.id);
     try {
+      // Get configured recipients
+      const baseRecipients = emailSettingsService.getRecipients();
+
+      // Auto-add merchant emails linked with buyer code
+      const merchantEmails = await getBuyerMerchantEmails(inspection.customerCode);
+      const allRecipients = [...baseRecipients];
+      if (merchantEmails.primary && !allRecipients.includes(merchantEmails.primary)) {
+        allRecipients.push(merchantEmails.primary);
+      }
+      if (merchantEmails.assistant && !allRecipients.includes(merchantEmails.assistant)) {
+        allRecipients.push(merchantEmails.assistant);
+      }
+
+      if (allRecipients.length === 0) {
+        alert('No email recipients found. Configure recipients in Settings or link merchants to the buyer.');
+        setSendingEmail(null);
+        return;
+      }
+
       const pdfBase64 = await generateFinalInspectionPDF(inspection);
 
       const resultColor = inspection.inspectionResult === 'PASS' ? '#22c55e' : '#ef4444';
@@ -150,7 +163,7 @@ export function InspectionList() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          to: recipients,
+          to: allRecipients,
           subject: `Final Inspection Report - ${inspection.customerName} - ${inspection.inspectionResult}`,
           html: emailHtml,
           pdfBase64,
@@ -163,17 +176,18 @@ export function InspectionList() {
         if (window.location.hostname === 'localhost') {
           throw new Error('Email sending requires Netlify. Run "netlify dev" instead of "npm run dev"');
         }
-        throw new Error(`Server error: ${response.status}`);
+        // Try to parse error message from response
+        try {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `Server error: ${response.status}`);
+        } catch {
+          throw new Error(`Server error: ${response.status}`);
+        }
       }
 
-      const text = await response.text();
-      if (!text) {
-        throw new Error('Empty response from server');
-      }
-
-      const result = JSON.parse(text);
+      const result = await response.json();
       if (result.success) {
-        alert('Email sent successfully!');
+        alert(`Email sent successfully to ${allRecipients.length} recipient(s)!`);
       } else {
         throw new Error(result.error || 'Failed to send email');
       }
