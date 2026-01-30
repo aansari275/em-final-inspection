@@ -1,5 +1,5 @@
 export type Company = 'EHI' | 'EMPL';
-export type OkNotOk = 'OK' | 'NOT OK';
+export type OkNotOk = 'OK' | 'NOT OK' | 'NA';
 export type YesNo = 'Yes' | 'No';
 export type PackingType = 'Assorted' | 'Solid';
 export type SizeUnit = 'cm' | 'feet';

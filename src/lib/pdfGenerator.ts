@@ -135,6 +135,9 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
     } else if (val === 'NOT OK' || val === 'No') {
       doc.setTextColor(...errorRed);
       doc.text('NOT OK', x, y + 4);
+    } else if (val === 'NA') {
+      doc.setTextColor(...lightGray);
+      doc.text('N/A', x, y + 4);
     } else {
       doc.setTextColor(...lightGray);
       doc.text('-', x, y + 4);

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { collection, addDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, getCustomers, addCustomer, getDesignNames, addDesignName, DesignName, getOpsByNumber, getOpsList, OpsOrder, OpsOrderItem } from '../lib/firebase';
+import { db, storage, getCustomers, addCustomer, getDesignNames, addDesignName, DesignName, getOpsByNumber, getOpsList, OpsOrder, OpsOrderItem, getBuyerMerchantEmails } from '../lib/firebase';
 import { emailSettingsService } from '../lib/emailSettingsService';
 import { generateFinalInspectionPDF } from '../lib/pdfGenerator';
 import { calculateAql, wouldPass, AqlCalculationResult } from '../lib/aqlCalculator';
@@ -522,6 +522,7 @@ export function FinalInspectionForm() {
   const [aqlCalculation, setAqlCalculation] = useState<AqlCalculationResult | null>(null);
   const [isAutoResult, setIsAutoResult] = useState(false);
   const [resultOverridden, setResultOverridden] = useState(false);
+  const [showAqlChart, setShowAqlChart] = useState(false);
 
   // Load customers from Firestore on mount
   useEffect(() => {
@@ -1363,7 +1364,18 @@ export function FinalInspectionForm() {
 
       // Generate PDF and send email
       const recipients = emailSettingsService.getRecipients();
-      if (recipients.length > 0) {
+
+      // Auto-add merchant emails (primary and assistant) linked with buyer code
+      const merchantEmails = await getBuyerMerchantEmails(inspection.customerCode);
+      const allRecipients = [...recipients];
+      if (merchantEmails.primary && !allRecipients.includes(merchantEmails.primary)) {
+        allRecipients.push(merchantEmails.primary);
+      }
+      if (merchantEmails.assistant && !allRecipients.includes(merchantEmails.assistant)) {
+        allRecipients.push(merchantEmails.assistant);
+      }
+
+      if (allRecipients.length > 0) {
         const pdfBase64 = await generateFinalInspectionPDF(inspection);
 
         const allPhotos = [
@@ -1508,7 +1520,7 @@ export function FinalInspectionForm() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            to: recipients,
+            to: allRecipients,
             subject: `Final Inspection: ${inspection.customerName} - ${inspection.buyerDesignName} [${inspection.inspectionResult}]`,
             html: emailHtml,
             pdfBase64,
@@ -1690,7 +1702,7 @@ export function FinalInspectionForm() {
                       <div className="flex justify-between items-start">
                         <div>
                           <p className="font-semibold text-emerald-700">{ops.salesNo}</p>
-                          <p className="text-sm text-gray-600">{ops.buyerName} ({ops.buyerCode})</p>
+                          <p className="text-sm text-gray-600">{ops.buyerCode}</p>
                         </div>
                         <div className="text-right">
                           <p className="text-sm font-medium">{ops.totalPcs} pcs</p>
@@ -1758,7 +1770,7 @@ export function FinalInspectionForm() {
               </div>
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Customer</p>
-                <p className="font-semibold">{opsData.buyerName} ({opsData.buyerCode})</p>
+                <p className="font-semibold">{opsData.buyerCode}</p>
               </div>
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wide">PO Number</p>
@@ -2536,7 +2548,17 @@ export function FinalInspectionForm() {
 
       {/* Quantities */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Inspection Quantities</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Inspection Quantities</h2>
+          <button
+            type="button"
+            onClick={() => setShowAqlChart(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 rounded-lg border border-teal-200 transition-colors"
+          >
+            <Info size={16} />
+            AQL Reference Chart
+          </button>
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           <div>
             <label className={labelClass}>Total Order Qty *</label>
@@ -2829,6 +2851,21 @@ export function FinalInspectionForm() {
                     />
                     <span className="text-sm text-red-600 font-medium">NOT OK</span>
                   </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name={key}
+                      value="NA"
+                      checked={fieldValue === 'NA'}
+                      onChange={() => {
+                        setFormData({ ...formData, [fieldKey]: 'NA' as OkNotOk });
+                        // Clear photo when changing to NA
+                        handleNotOkPhotoChange(key, null);
+                      }}
+                      className="text-gray-400"
+                    />
+                    <span className="text-sm text-gray-500 font-medium">NA</span>
+                  </label>
                 </div>
                 <NotOkPhotoUpload
                   fieldKey={key}
@@ -2955,6 +2992,34 @@ export function FinalInspectionForm() {
           </div>
         </div>
       </div>
+
+      {/* AQL Reference Chart Modal */}
+      {showAqlChart && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setShowAqlChart(false)}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white rounded-t-xl">
+              <h3 className="text-lg font-semibold text-gray-900">AQL Z1.4-2008 Reference Chart</h3>
+              <button
+                type="button"
+                onClick={() => setShowAqlChart(false)}
+                className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+              >
+                <X size={20} className="text-gray-500" />
+              </button>
+            </div>
+            <div className="p-4">
+              <img
+                src="/img/aql_chart_gemini3.png"
+                alt="AQL Z1.4-2008 Reference Chart"
+                className="w-full h-auto rounded-lg"
+              />
+              <p className="text-sm text-gray-500 mt-3 text-center">
+                Level II Normal Inspection • ANSI/ASQ Z1.4-2008 Standard
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </form>
   );
 }

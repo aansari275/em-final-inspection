@@ -230,12 +230,20 @@ export async function getOpsList(): Promise<Array<{ salesNo: string; buyerName: 
     return snapshot.docs
       .map(doc => {
         const data = doc.data();
+        // Calculate totalPcs from items array if not directly available
+        let totalPcs = (data.totalPcs as number) || 0;
+        if (totalPcs === 0 && Array.isArray(data.items)) {
+          totalPcs = (data.items as Array<{ qty?: number; pcs?: number }>).reduce(
+            (sum, item) => sum + ((item.qty as number) || (item.pcs as number) || 0),
+            0
+          );
+        }
         return {
           salesNo: (data.salesNo as string) || '',
           buyerName: (data.buyerName as string) || '',
           buyerCode: (data.buyerCode as string) || (data.customerCode as string) || '',
           poNumber: (data.poNumber as string) || (data.poNo as string) || '',
-          totalPcs: (data.totalPcs as number) || 0,
+          totalPcs,
           status: (data.status as string) || '',
         };
       })
@@ -326,6 +334,87 @@ function mapOrderToOps(docId: string, data: Record<string, unknown>): OpsOrder {
     status: (data.status as string) || '',
     items,
   };
+}
+
+/**
+ * Get merchant emails by buyer code
+ * Looks up merchants collection and returns emails for primary & assistant merchants
+ */
+export async function getMerchantEmailsByBuyerCode(buyerCode: string): Promise<string[]> {
+  if (!buyerCode) return [];
+
+  try {
+    const merchantsRef = collection(db, 'merchants');
+    const snapshot = await getDocs(merchantsRef);
+
+    const emails: string[] = [];
+
+    snapshot.docs.forEach(doc => {
+      const data = doc.data();
+      const assignedBuyerCodes = (data.assignedBuyerCodes as string[]) || [];
+      const email = (data.email as string) || '';
+      const isActive = data.isActive !== false; // Default to active if not specified
+
+      if (isActive && email && assignedBuyerCodes.includes(buyerCode)) {
+        emails.push(email);
+      }
+    });
+
+    return emails;
+  } catch (error) {
+    console.error('Error fetching merchant emails:', error);
+    return [];
+  }
+}
+
+/**
+ * Get buyer profile with merchant info
+ * Returns primary and assistant merchant emails for a buyer
+ */
+export async function getBuyerMerchantEmails(buyerCode: string): Promise<{ primary?: string; assistant?: string }> {
+  if (!buyerCode) return {};
+
+  try {
+    // First check buyers collection for assigned merchants
+    const buyersRef = collection(db, 'buyers');
+    const q = query(buyersRef, where('code', '==', buyerCode));
+    const buyerSnapshot = await getDocs(q);
+
+    if (buyerSnapshot.empty) return {};
+
+    const buyerData = buyerSnapshot.docs[0].data();
+    const primaryMerchantId = buyerData.primaryMerchantId as string;
+    const assistantMerchantId = buyerData.assistantMerchantId as string;
+
+    const result: { primary?: string; assistant?: string } = {};
+
+    // Fetch merchant emails by ID
+    if (primaryMerchantId || assistantMerchantId) {
+      const merchantsRef = collection(db, 'merchants');
+      const merchantsSnapshot = await getDocs(merchantsRef);
+
+      merchantsSnapshot.docs.forEach(doc => {
+        const data = doc.data();
+        const email = (data.email as string) || '';
+        const merchantId = doc.id;
+        const merchantCode = (data.code as string) || '';
+
+        if (email) {
+          if (primaryMerchantId && (merchantId === primaryMerchantId || merchantCode === primaryMerchantId)) {
+            result.primary = email;
+          }
+          if (assistantMerchantId && (merchantId === assistantMerchantId || merchantCode === assistantMerchantId)) {
+            result.assistant = email;
+          }
+        }
+      });
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error fetching buyer merchant emails:', error);
+    return {};
+  }
 }
 
 export default app;

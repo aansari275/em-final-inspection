@@ -582,68 +582,116 @@ export function InspectionList() {
                 </div>
               )}
 
-              {/* Photos */}
+              {/* Photos - Thumbnail Grid */}
               <div className="mt-4 pt-4 border-t">
-                <p className="text-sm text-gray-500 mb-2">Photos:</p>
-                <div className="flex flex-wrap gap-2">
+                <p className="text-sm text-gray-500 mb-3">Photos:</p>
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2">
                   {inspection.approvedSamplePhoto && (
-                    <a href={inspection.approvedSamplePhoto} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-emerald-600 hover:underline text-sm">
-                      <Eye size={14} /> Approved Sample
+                    <a href={inspection.approvedSamplePhoto} target="_blank" rel="noopener noreferrer" className="group relative aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-emerald-400 transition-colors">
+                      <img src={inspection.approvedSamplePhoto} alt="Approved Sample" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                        <Eye size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate">Sample</span>
                     </a>
                   )}
                   {inspection.idPhoto && (
-                    <a href={inspection.idPhoto} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-emerald-600 hover:underline text-sm">
-                      <Eye size={14} /> ID
+                    <a href={inspection.idPhoto} target="_blank" rel="noopener noreferrer" className="group relative aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-emerald-400 transition-colors">
+                      <img src={inspection.idPhoto} alt="ID" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                        <Eye size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate">ID</span>
                     </a>
                   )}
                   {inspection.redSealFrontPhoto && (
-                    <a href={inspection.redSealFrontPhoto} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-emerald-600 hover:underline text-sm">
-                      <Eye size={14} /> Red Seal Front
+                    <a href={inspection.redSealFrontPhoto} target="_blank" rel="noopener noreferrer" className="group relative aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-emerald-400 transition-colors">
+                      <img src={inspection.redSealFrontPhoto} alt="Red Seal Front" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                        <Eye size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate">Red Seal</span>
                     </a>
                   )}
                   {inspection.redSealSidePhoto && (
-                    <a href={inspection.redSealSidePhoto} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-emerald-600 hover:underline text-sm">
-                      <Eye size={14} /> Red Seal Side
+                    <a href={inspection.redSealSidePhoto} target="_blank" rel="noopener noreferrer" className="group relative aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-emerald-400 transition-colors">
+                      <img src={inspection.redSealSidePhoto} alt="Red Seal Side" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                        <Eye size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate">Seal Side</span>
                     </a>
                   )}
                   {inspection.backPhoto && (
-                    <a href={inspection.backPhoto} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-emerald-600 hover:underline text-sm">
-                      <Eye size={14} /> Back
+                    <a href={inspection.backPhoto} target="_blank" rel="noopener noreferrer" className="group relative aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-emerald-400 transition-colors">
+                      <img src={inspection.backPhoto} alt="Back" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                        <Eye size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate">Back</span>
                     </a>
                   )}
                   {inspection.labelPhoto && (
-                    <a href={inspection.labelPhoto} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-emerald-600 hover:underline text-sm">
-                      <Eye size={14} /> Label
+                    <a href={inspection.labelPhoto} target="_blank" rel="noopener noreferrer" className="group relative aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-emerald-400 transition-colors">
+                      <img src={inspection.labelPhoto} alt="Label" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                        <Eye size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate">Label</span>
                     </a>
                   )}
                   {inspection.moisturePhoto && (
-                    <a href={inspection.moisturePhoto} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-emerald-600 hover:underline text-sm">
-                      <Eye size={14} /> Moisture
+                    <a href={inspection.moisturePhoto} target="_blank" rel="noopener noreferrer" className="group relative aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-emerald-400 transition-colors">
+                      <img src={inspection.moisturePhoto} alt="Moisture" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                        <Eye size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate">Moisture</span>
                     </a>
                   )}
                   {inspection.sizeFrontPhoto && (
-                    <a href={inspection.sizeFrontPhoto} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-emerald-600 hover:underline text-sm">
-                      <Eye size={14} /> Size Front
+                    <a href={inspection.sizeFrontPhoto} target="_blank" rel="noopener noreferrer" className="group relative aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-emerald-400 transition-colors">
+                      <img src={inspection.sizeFrontPhoto} alt="Size Front" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                        <Eye size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate">Size Front</span>
                     </a>
                   )}
                   {inspection.sizeSidePhoto && (
-                    <a href={inspection.sizeSidePhoto} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-emerald-600 hover:underline text-sm">
-                      <Eye size={14} /> Size Side
+                    <a href={inspection.sizeSidePhoto} target="_blank" rel="noopener noreferrer" className="group relative aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-emerald-400 transition-colors">
+                      <img src={inspection.sizeSidePhoto} alt="Size Side" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                        <Eye size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate">Size Side</span>
                     </a>
                   )}
                   {inspection.inspectedSamplesPhoto && (
-                    <a href={inspection.inspectedSamplesPhoto} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-emerald-600 hover:underline text-sm">
-                      <Eye size={14} /> Inspected Samples
+                    <a href={inspection.inspectedSamplesPhoto} target="_blank" rel="noopener noreferrer" className="group relative aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-emerald-400 transition-colors">
+                      <img src={inspection.inspectedSamplesPhoto} alt="Inspected Samples" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                        <Eye size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate">Inspected</span>
                     </a>
                   )}
                   {inspection.metalCheckingPhoto && (
-                    <a href={inspection.metalCheckingPhoto} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-emerald-600 hover:underline text-sm">
-                      <Eye size={14} /> Metal Checking
+                    <a href={inspection.metalCheckingPhoto} target="_blank" rel="noopener noreferrer" className="group relative aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-emerald-400 transition-colors">
+                      <img src={inspection.metalCheckingPhoto} alt="Metal Checking" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                        <Eye size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate">Metal</span>
                     </a>
                   )}
                   {inspection.otherPhotos.map((url, i) => (
-                    <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-emerald-600 hover:underline text-sm">
-                      <Eye size={14} /> Other {i + 1}
+                    <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="group relative aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-emerald-400 transition-colors">
+                      <img src={url} alt={`Other ${i + 1}`} className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                        <Eye size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate">Other {i + 1}</span>
                     </a>
                   ))}
                 </div>
@@ -878,6 +926,49 @@ export function InspectionList() {
                   <p className="text-gray-700">{previewInspection.qcInspectorRemarks}</p>
                 </div>
               )}
+
+              {/* Photos Gallery */}
+              {(() => {
+                const photos = [
+                  { url: previewInspection.approvedSamplePhoto, label: 'Approved Sample' },
+                  { url: previewInspection.idPhoto, label: 'ID' },
+                  { url: previewInspection.redSealFrontPhoto, label: 'Red Seal Front' },
+                  { url: previewInspection.redSealSidePhoto, label: 'Red Seal Side' },
+                  { url: previewInspection.backPhoto, label: 'Back' },
+                  { url: previewInspection.labelPhoto, label: 'Label' },
+                  { url: previewInspection.moisturePhoto, label: 'Moisture' },
+                  { url: previewInspection.sizeFrontPhoto, label: 'Size Front' },
+                  { url: previewInspection.sizeSidePhoto, label: 'Size Side' },
+                  { url: previewInspection.inspectedSamplesPhoto, label: 'Inspected' },
+                  { url: previewInspection.metalCheckingPhoto, label: 'Metal Check' },
+                  ...(previewInspection.otherPhotos || []).map((url, i) => ({ url, label: `Other ${i + 1}` })),
+                ].filter(p => p.url);
+
+                return photos.length > 0 ? (
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <h4 className="font-semibold text-emerald-700 mb-3">Photos ({photos.length})</h4>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {photos.map((photo, idx) => (
+                        <a
+                          key={idx}
+                          href={photo.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="group relative aspect-[4/3] rounded-lg overflow-hidden border-2 border-gray-200 hover:border-emerald-400 transition-all hover:shadow-lg"
+                        >
+                          <img src={photo.url} alt={photo.label} className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+                            <Eye size={24} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </div>
+                          <span className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-xs px-2 py-1 text-center">
+                            {photo.label}
+                          </span>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                ) : null;
+              })()}
 
               {/* Footer */}
               <div className="border-t pt-4 text-sm text-gray-500 text-center">
