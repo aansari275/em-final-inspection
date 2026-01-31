@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <rect width="192" height="192" rx="24" fill="#10b981"/>
+  <text x="96" y="75" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="white" text-anchor="middle">Final</text>
+  <text x="96" y="115" font-family="Arial, sans-serif" font-size="28" font-weight="bold" fill="white" text-anchor="middle">Inspection</text>
+  <path d="M60 135 L85 160 L135 110" stroke="white" stroke-width="10" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

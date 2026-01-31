@@ -1364,7 +1364,7 @@ export function FinalInspectionForm() {
       await addDoc(collection(db, 'final-inspections'), inspection);
 
       // Generate PDF and send email
-      const recipients = emailSettingsService.getRecipients();
+      const recipients = await emailSettingsService.getRecipients();
 
       // Auto-add merchant emails (primary and assistant) linked with buyer code
       const merchantEmails = await getBuyerMerchantEmails(inspection.customerCode);
@@ -1524,7 +1524,7 @@ export function FinalInspectionForm() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               to: allRecipients,
-              subject: `Final Inspection: ${inspection.customerName} - ${inspection.buyerDesignName} [${inspection.inspectionResult}]`,
+              subject: `Final Inspection: ${inspection.customerCode} - ${inspection.buyerDesignName} [${inspection.inspectionResult}]`,
               html: emailHtml,
               pdfBase64,
               pdfFilename: `Final_Inspection_${inspection.opsNo}_${inspection.inspectionDate}.pdf`

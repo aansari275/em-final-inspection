@@ -3,6 +3,9 @@
   publish = "dist"
   functions = "netlify/functions"
 
+[functions."send-email"]
+  timeout_seconds = 60
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

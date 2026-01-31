@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { collection, query, orderBy, getDocs, deleteDoc, doc } from 'firebase/firestore';
-import { db, getBuyerMerchantEmails } from '../lib/firebase';
+import { db, getBuyerMerchantEmails, uploadPdfToStorage } from '../lib/firebase';
 import { FinalInspection, COMPANY_NAMES, Company } from '../types';
 import { generateFinalInspectionPDF } from '../lib/pdfGenerator';
 import { emailSettingsService } from '../lib/emailSettingsService';
@@ -79,8 +79,8 @@ export function InspectionList() {
   const handleResendEmail = async (inspection: FinalInspection & { id: string }) => {
     setSendingEmail(inspection.id);
     try {
-      // Get configured recipients
-      const baseRecipients = emailSettingsService.getRecipients();
+      // Get configured recipients from Firestore
+      const baseRecipients = await emailSettingsService.getRecipients();
 
       // Auto-add merchant emails linked with buyer code
       const merchantEmails = await getBuyerMerchantEmails(inspection.customerCode);
@@ -98,10 +98,18 @@ export function InspectionList() {
         return;
       }
 
+      // Generate PDF
       const pdfBase64 = await generateFinalInspectionPDF(inspection);
+      const pdfFilename = `Final_Inspection_${inspection.customerCode}_${inspection.inspectionDate}.pdf`;
+
+      // Upload PDF to Firebase Storage
+      const pdfUrl = await uploadPdfToStorage(pdfBase64, pdfFilename);
 
       const resultColor = inspection.inspectionResult === 'PASS' ? '#22c55e' : '#ef4444';
+      const resultBg = inspection.inspectionResult === 'PASS' ? '#dcfce7' : '#fee2e2';
       const companyFullName = COMPANY_NAMES[inspection.company as Company] || 'Eastern Mills';
+
+      // Email with download link instead of attachment
       const emailHtml = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 20px; text-align: center;">
@@ -117,12 +125,12 @@ export function InspectionList() {
 
               <table style="width: 100%; border-collapse: collapse;">
                 <tr>
-                  <td style="padding: 8px 0; color: #6b7280; width: 40%;">Customer:</td>
-                  <td style="padding: 8px 0; color: #111827; font-weight: 500;">${inspection.customerName}</td>
+                  <td style="padding: 8px 0; color: #6b7280; width: 40%;">Buyer Code:</td>
+                  <td style="padding: 8px 0; color: #111827; font-weight: 500;">${inspection.customerCode}</td>
                 </tr>
                 <tr>
                   <td style="padding: 8px 0; color: #6b7280;">Design:</td>
-                  <td style="padding: 8px 0; color: #111827; font-weight: 500;">${inspection.buyerDesignName}</td>
+                  <td style="padding: 8px 0; color: #111827; font-weight: 500;">${inspection.buyerDesignName || inspection.emplDesignNo}</td>
                 </tr>
                 <tr>
                   <td style="padding: 8px 0; color: #6b7280;">OPS No:</td>
@@ -139,7 +147,7 @@ export function InspectionList() {
               </table>
             </div>
 
-            <div style="background: white; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <div style="background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
               <h3 style="margin: 0 0 15px 0; color: #111827; font-size: 16px;">Quantities</h3>
               <table style="width: 100%; border-collapse: collapse;">
                 <tr>
@@ -151,6 +159,17 @@ export function InspectionList() {
                   <td style="padding: 8px 0; color: #ef4444; font-weight: bold;">${inspection.rejectedQty}</td>
                 </tr>
               </table>
+            </div>
+
+            <!-- Download Button -->
+            <div style="text-align: center; padding: 20px;">
+              <a href="${pdfUrl}"
+                 style="display: inline-block; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
+                📄 Download Full Report (PDF)
+              </a>
+              <p style="margin-top: 12px; color: #6b7280; font-size: 12px;">
+                Click the button above to download the complete inspection report with all photos
+              </p>
             </div>
           </div>
 
@@ -165,19 +184,17 @@ export function InspectionList() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           to: allRecipients,
-          subject: `Final Inspection Report - ${inspection.customerName} - ${inspection.inspectionResult}`,
+          subject: `Final Inspection Report - ${inspection.customerCode} - ${inspection.inspectionResult}`,
           html: emailHtml,
-          pdfBase64,
-          pdfFilename: `Final_Inspection_${inspection.customerName}_${inspection.inspectionDate}.pdf`
+          pdfBase64: pdfBase64,
+          pdfFilename: pdfFilename
         })
       });
 
       if (!response.ok) {
-        // Check if running on localhost without Netlify functions
         if (window.location.hostname === 'localhost') {
           throw new Error('Email sending requires Netlify. Run "netlify dev" instead of "npm run dev"');
         }
-        // Try to parse error message from response
         try {
           const errorData = await response.json();
           throw new Error(errorData.error || `Server error: ${response.status}`);
@@ -188,7 +205,7 @@ export function InspectionList() {
 
       const result = await response.json();
       if (result.success) {
-        alert(`Email sent successfully to ${allRecipients.length} recipient(s)!`);
+        alert(`Email sent successfully to ${allRecipients.length} recipient(s) with PDF download link!`);
       } else {
         throw new Error(result.error || 'Failed to send email');
       }

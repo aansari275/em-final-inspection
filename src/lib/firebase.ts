@@ -4,12 +4,15 @@ import {
   collection,
   addDoc,
   getDocs,
+  doc,
+  getDoc,
+  setDoc,
   query,
   orderBy,
   where,
   serverTimestamp,
 } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
+import { getStorage, ref, uploadString, getDownloadURL } from 'firebase/storage';
 import type { Customer } from '../types';
 
 // OPS Order Item interface
@@ -414,6 +417,38 @@ export async function getBuyerMerchantEmails(buyerCode: string): Promise<{ prima
   } catch (error) {
     console.error('Error fetching buyer merchant emails:', error);
     return {};
+  }
+}
+
+// ============================================
+// PDF Upload to Firebase Storage
+// ============================================
+
+/**
+ * Upload PDF to Firebase Storage and get download URL
+ * @param pdfBase64 Base64 encoded PDF string
+ * @param filename Filename for the PDF
+ * @returns Download URL for the uploaded PDF
+ */
+export async function uploadPdfToStorage(pdfBase64: string, filename: string): Promise<string> {
+  try {
+    const timestamp = Date.now();
+    const safeName = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const storagePath = `final-inspection-reports/${timestamp}_${safeName}`;
+
+    const storageRef = ref(storage, storagePath);
+
+    // Upload the base64 PDF
+    await uploadString(storageRef, pdfBase64, 'base64', {
+      contentType: 'application/pdf'
+    });
+
+    // Get the download URL
+    const downloadUrl = await getDownloadURL(storageRef);
+    return downloadUrl;
+  } catch (error) {
+    console.error('Error uploading PDF to storage:', error);
+    throw error;
   }
 }
 

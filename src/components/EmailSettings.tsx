@@ -7,9 +7,44 @@ export function EmailSettings() {
   const [newEmail, setNewEmail] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setSettings(emailSettingsService.getSettings());
+    const loadSettings = async () => {
+      setLoading(true);
+      try {
+        // First try to load from Firestore
+        let loadedSettings = await emailSettingsService.getSettings();
+
+        // If Firestore is empty, check for localStorage data and migrate
+        if (loadedSettings.recipients.length === 0) {
+          const LOCAL_STORAGE_KEY = 'em-final-inspection-email-settings';
+          const localData = localStorage.getItem(LOCAL_STORAGE_KEY);
+          if (localData) {
+            try {
+              const parsedLocal = JSON.parse(localData);
+              if (parsedLocal.recipients && parsedLocal.recipients.length > 0) {
+                // Migrate localStorage data to Firestore
+                await emailSettingsService.saveSettings(parsedLocal);
+                loadedSettings = parsedLocal;
+                // Clear localStorage after successful migration
+                localStorage.removeItem(LOCAL_STORAGE_KEY);
+                console.log('Migrated email settings from localStorage to Firestore');
+              }
+            } catch (e) {
+              console.error('Error migrating localStorage:', e);
+            }
+          }
+        }
+
+        setSettings(loadedSettings);
+      } catch (error) {
+        console.error('Error loading settings:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadSettings();
   }, []);
 
   const handleAddEmail = () => {
@@ -44,9 +79,12 @@ export function EmailSettings() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      emailSettingsService.saveSettings(settings);
+      await emailSettingsService.saveSettings(settings);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      alert('Failed to save settings. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -74,6 +112,12 @@ export function EmailSettings() {
           </div>
         </div>
 
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+            <span className="ml-2 text-gray-600">Loading settings...</span>
+          </div>
+        ) : (
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -148,6 +192,7 @@ export function EmailSettings() {
             </button>
           </div>
         </div>
+        )}
 
         <div className="mt-6 p-4 bg-emerald-50 rounded-lg">
           <h3 className="text-sm font-medium text-emerald-900 mb-2">How it works</h3>
@@ -155,7 +200,8 @@ export function EmailSettings() {
             <li>• When you submit an inspection, a PDF report is generated</li>
             <li>• The report includes all inspection details and photos</li>
             <li>• An email with the PDF attached is sent to all recipients</li>
-            <li>• Settings are saved locally on this device</li>
+            <li>• Merchants linked to the buyer are auto-CC'd (primary + assistant)</li>
+            <li>• Settings are synced across all devices via cloud</li>
           </ul>
         </div>
       </div>

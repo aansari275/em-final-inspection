@@ -6,9 +6,10 @@ Final Inspection QC form application for Eastern Home Industries (EHI) and Easte
 ## Tech Stack
 - **Frontend:** React 18 + TypeScript, Vite, Tailwind CSS
 - **Database:** Firebase Firestore
-- **Storage:** Firebase Storage (photos)
+- **Storage:** Firebase Storage (photos + PDF reports)
 - **Hosting:** Netlify
 - **PDF Generation:** jsPDF
+- **PWA:** vite-plugin-pwa (installable, offline support)
 
 ## URLs
 - **Production:** https://em-final-inspection.netlify.app
@@ -16,10 +17,15 @@ Final Inspection QC form application for Eastern Home Industries (EHI) and Easte
 - **Netlify Site ID:** 294f76b7-f82e-4544-932d-0e0145d4ad67
 
 ## Firebase Collections
-- **`final_inspections`** - Saved inspection reports
+- **`final-inspections`** - Saved inspection reports
 - **`buyers`** - Shared customer/buyer directory (read)
 - **`orders/data/orders`** - OPS orders for lookup (read)
 - **`empl_design_name`** - Shared design names (read/write)
+- **`settings/final_inspection_email`** - Email recipient settings (synced across devices)
+
+## Firebase Storage Paths
+- **`final-inspection-images/`** - Inspection photos
+- **`final-inspection-reports/`** - Generated PDF reports (for email links)
 
 ---
 
@@ -149,16 +155,25 @@ All OK/NOT OK checks:
 - AQL Z1.4-2008 calculation details included
 
 ### Email Reports
-- HTML email with inspection summary
-- Inspected Articles table
-- Photo attachments
-- PDF attachment
-- **Auto-sends to merchants** linked with buyer code (primary + assistant)
+- **Sender:** "Eastern Quality" <abdulansari@easternmills.com>
+- **Subject:** `Final Inspection Report - [BUYER CODE] - PASS/FAIL`
+- HTML email with inspection summary (shows buyer code, not name)
+- **PDF attachment** included
+- **Download link** as backup (PDF uploaded to Firebase Storage)
+- **Auto-CC merchants** linked with buyer code (primary + assistant)
+- Email settings stored in Firestore (synced across all devices)
 
 ### Draft System
 - Auto-save every 30 seconds
 - Manual save button
 - Draft restoration on page load
+
+### PWA (Progressive Web App)
+- **Installable** on mobile and desktop
+- **Offline support** with service worker caching
+- **App icon** with green checkmark branding
+- Standalone mode (no browser UI)
+- Auto-updates when new version deployed
 
 ### AQL Z1.4-2008 Auto-Calculation
 Implements ANSI/ASQ Z1.4-2008 standard for acceptance sampling:

@@ -1,4 +1,7 @@
-const STORAGE_KEY = 'em-final-inspection-email-settings';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db } from './firebase';
+
+const SETTINGS_DOC = 'final_inspection_email';
 
 export interface EmailSettings {
   recipients: string[];
@@ -9,27 +12,38 @@ const defaultSettings: EmailSettings = {
 };
 
 export const emailSettingsService = {
-  getSettings(): EmailSettings {
+  async getSettings(): Promise<EmailSettings> {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        return JSON.parse(stored);
+      const docRef = doc(db, 'settings', SETTINGS_DOC);
+      const docSnap = await getDoc(docRef);
+
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        return {
+          recipients: (data.recipients as string[]) || []
+        };
       }
     } catch (error) {
-      console.error('Error reading email settings:', error);
+      console.error('Error reading email settings from Firestore:', error);
     }
     return defaultSettings;
   },
 
-  saveSettings(settings: EmailSettings): void {
+  async saveSettings(settings: EmailSettings): Promise<void> {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+      const docRef = doc(db, 'settings', SETTINGS_DOC);
+      await setDoc(docRef, {
+        recipients: settings.recipients,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
     } catch (error) {
-      console.error('Error saving email settings:', error);
+      console.error('Error saving email settings to Firestore:', error);
+      throw error;
     }
   },
 
-  getRecipients(): string[] {
-    return this.getSettings().recipients;
+  async getRecipients(): Promise<string[]> {
+    const settings = await this.getSettings();
+    return settings.recipients;
   }
 };

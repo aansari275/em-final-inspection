@@ -1,7 +1,11 @@
 import { jsPDF } from 'jspdf';
 import { FinalInspection, COMPANY_NAMES, OK_NOT_OK_FIELDS } from '../types';
 
-// Convert image URL to base64 data URL to avoid CORS issues
+// Max image dimension for PDF - high quality for readability
+const MAX_IMAGE_DIMENSION = 1600;
+const JPEG_QUALITY = 0.85; // 85% quality - clear and readable
+
+// Convert image URL to base64 data URL with compression
 async function urlToBase64(url: string): Promise<string | null> {
   if (!url) return null;
 
@@ -21,13 +25,27 @@ async function urlToBase64(url: string): Promise<string | null> {
 
       img.onload = () => {
         try {
+          let width = img.naturalWidth || img.width;
+          let height = img.naturalHeight || img.height;
+
+          // Resize if image is larger than max dimension
+          if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+            if (width > height) {
+              height = Math.round((height * MAX_IMAGE_DIMENSION) / width);
+              width = MAX_IMAGE_DIMENSION;
+            } else {
+              width = Math.round((width * MAX_IMAGE_DIMENSION) / height);
+              height = MAX_IMAGE_DIMENSION;
+            }
+          }
+
           const canvas = document.createElement('canvas');
-          canvas.width = img.naturalWidth || img.width;
-          canvas.height = img.naturalHeight || img.height;
+          canvas.width = width;
+          canvas.height = height;
           const ctx = canvas.getContext('2d');
           if (ctx) {
-            ctx.drawImage(img, 0, 0);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            ctx.drawImage(img, 0, 0, width, height);
+            const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
             resolve(dataUrl);
           } else {
             resolve(null);
@@ -61,7 +79,7 @@ async function urlToBase64(url: string): Promise<string | null> {
   }
 }
 
-// Fallback fetch method for images
+// Fallback fetch method for images with compression
 async function fetchImageAsFallback(url: string): Promise<string | null> {
   try {
     const controller = new AbortController();
@@ -81,11 +99,38 @@ async function fetchImageAsFallback(url: string): Promise<string | null> {
     }
 
     const blob = await response.blob();
+
+    // Convert blob to image, resize, and compress
     return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        // Resize if needed
+        if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+          if (width > height) {
+            height = Math.round((height * MAX_IMAGE_DIMENSION) / width);
+            width = MAX_IMAGE_DIMENSION;
+          } else {
+            width = Math.round((width * MAX_IMAGE_DIMENSION) / height);
+            height = MAX_IMAGE_DIMENSION;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', JPEG_QUALITY));
+        } else {
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = URL.createObjectURL(blob);
     });
   } catch (error) {
     console.error('Fetch fallback failed:', error);
