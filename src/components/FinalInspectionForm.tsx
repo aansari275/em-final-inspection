@@ -3121,24 +3121,33 @@ export function FinalInspectionForm() {
                 <div>
                   <h5 className="text-sm font-semibold text-teal-600 mb-2 text-center">ACCEPT / REJECT BY AQL</h5>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm border-collapse">
+                    <table className="w-full text-xs border-collapse">
                       <thead>
                         <tr className="bg-teal-50">
                           <th className="border border-teal-200 px-1 py-1 text-center">Code</th>
                           <th className="border border-teal-200 px-1 py-1 text-center">Sample</th>
-                          <th className="border border-teal-200 px-1 py-1 text-center" colSpan={2}>AQL 1.0</th>
-                          <th className="border border-teal-200 px-1 py-1 text-center" colSpan={2}>AQL 2.5</th>
-                          <th className="border border-teal-200 px-1 py-1 text-center" colSpan={2}>AQL 4.0</th>
+                          <th className="border border-teal-200 px-1 py-1 text-center" colSpan={2}>0.65</th>
+                          <th className="border border-teal-200 px-1 py-1 text-center" colSpan={2}>1.0</th>
+                          <th className="border border-teal-200 px-1 py-1 text-center" colSpan={2}>1.5</th>
+                          <th className="border border-teal-200 px-1 py-1 text-center" colSpan={2}>2.5</th>
+                          <th className="border border-teal-200 px-1 py-1 text-center" colSpan={2}>4.0</th>
+                          <th className="border border-teal-200 px-1 py-1 text-center" colSpan={2}>6.5</th>
                         </tr>
                         <tr className="bg-teal-50 text-xs">
-                          <th className="border border-teal-200 px-1 py-0.5"></th>
-                          <th className="border border-teal-200 px-1 py-0.5"></th>
-                          <th className="border border-teal-200 px-1 py-0.5 text-green-600">Ac</th>
-                          <th className="border border-teal-200 px-1 py-0.5 text-red-600">Re</th>
-                          <th className="border border-teal-200 px-1 py-0.5 text-green-600">Ac</th>
-                          <th className="border border-teal-200 px-1 py-0.5 text-red-600">Re</th>
-                          <th className="border border-teal-200 px-1 py-0.5 text-green-600">Ac</th>
-                          <th className="border border-teal-200 px-1 py-0.5 text-red-600">Re</th>
+                          <th className="border border-teal-200 px-0.5 py-0.5"></th>
+                          <th className="border border-teal-200 px-0.5 py-0.5"></th>
+                          <th className="border border-teal-200 px-0.5 py-0.5 text-green-600">Ac</th>
+                          <th className="border border-teal-200 px-0.5 py-0.5 text-red-600">Re</th>
+                          <th className="border border-teal-200 px-0.5 py-0.5 text-green-600">Ac</th>
+                          <th className="border border-teal-200 px-0.5 py-0.5 text-red-600">Re</th>
+                          <th className="border border-teal-200 px-0.5 py-0.5 text-green-600">Ac</th>
+                          <th className="border border-teal-200 px-0.5 py-0.5 text-red-600">Re</th>
+                          <th className="border border-teal-200 px-0.5 py-0.5 text-green-600">Ac</th>
+                          <th className="border border-teal-200 px-0.5 py-0.5 text-red-600">Re</th>
+                          <th className="border border-teal-200 px-0.5 py-0.5 text-green-600">Ac</th>
+                          <th className="border border-teal-200 px-0.5 py-0.5 text-red-600">Re</th>
+                          <th className="border border-teal-200 px-0.5 py-0.5 text-green-600">Ac</th>
+                          <th className="border border-teal-200 px-0.5 py-0.5 text-red-600">Re</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -3156,14 +3165,20 @@ export function FinalInspectionForm() {
                           };
                           return (
                             <tr key={code} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                              <td className="border border-gray-200 px-1 py-1 text-center font-semibold text-teal-700">{code}</td>
-                              <td className="border border-gray-200 px-1 py-1 text-center">{SAMPLE_SIZES[code]}</td>
-                              <td className="border border-gray-200 px-1 py-1 text-center text-green-600">{renderCell(aqlValues?.['1.0'])}</td>
-                              <td className="border border-gray-200 px-1 py-1 text-center text-red-600">{renderRejectCell(aqlValues?.['1.0'])}</td>
-                              <td className="border border-gray-200 px-1 py-1 text-center text-green-600">{renderCell(aqlValues?.['2.5'])}</td>
-                              <td className="border border-gray-200 px-1 py-1 text-center text-red-600">{renderRejectCell(aqlValues?.['2.5'])}</td>
-                              <td className="border border-gray-200 px-1 py-1 text-center text-green-600">{renderCell(aqlValues?.['4.0'])}</td>
-                              <td className="border border-gray-200 px-1 py-1 text-center text-red-600">{renderRejectCell(aqlValues?.['4.0'])}</td>
+                              <td className="border border-gray-200 px-1 py-0.5 text-center font-semibold text-teal-700">{code}</td>
+                              <td className="border border-gray-200 px-1 py-0.5 text-center">{SAMPLE_SIZES[code]}</td>
+                              <td className="border border-gray-200 px-0.5 py-0.5 text-center text-green-600">{renderCell(aqlValues?.['0.65'])}</td>
+                              <td className="border border-gray-200 px-0.5 py-0.5 text-center text-red-600">{renderRejectCell(aqlValues?.['0.65'])}</td>
+                              <td className="border border-gray-200 px-0.5 py-0.5 text-center text-green-600">{renderCell(aqlValues?.['1.0'])}</td>
+                              <td className="border border-gray-200 px-0.5 py-0.5 text-center text-red-600">{renderRejectCell(aqlValues?.['1.0'])}</td>
+                              <td className="border border-gray-200 px-0.5 py-0.5 text-center text-green-600">{renderCell(aqlValues?.['1.5'])}</td>
+                              <td className="border border-gray-200 px-0.5 py-0.5 text-center text-red-600">{renderRejectCell(aqlValues?.['1.5'])}</td>
+                              <td className="border border-gray-200 px-0.5 py-0.5 text-center text-green-600">{renderCell(aqlValues?.['2.5'])}</td>
+                              <td className="border border-gray-200 px-0.5 py-0.5 text-center text-red-600">{renderRejectCell(aqlValues?.['2.5'])}</td>
+                              <td className="border border-gray-200 px-0.5 py-0.5 text-center text-green-600">{renderCell(aqlValues?.['4.0'])}</td>
+                              <td className="border border-gray-200 px-0.5 py-0.5 text-center text-red-600">{renderRejectCell(aqlValues?.['4.0'])}</td>
+                              <td className="border border-gray-200 px-0.5 py-0.5 text-center text-green-600">{renderCell(aqlValues?.['6.5'])}</td>
+                              <td className="border border-gray-200 px-0.5 py-0.5 text-center text-red-600">{renderRejectCell(aqlValues?.['6.5'])}</td>
                             </tr>
                           );
                         })}
