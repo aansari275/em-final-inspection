@@ -5,6 +5,7 @@ import { db, storage, getCustomers, addCustomer, getDesignNames, addDesignName, 
 import { emailSettingsService } from '../lib/emailSettingsService';
 import { generateFinalInspectionPDF } from '../lib/pdfGenerator';
 import { calculateAql, wouldPass, AqlCalculationResult } from '../lib/aqlCalculator';
+import { LOT_SIZE_CODE_LETTERS, SAMPLE_SIZES, AQL_ACCEPT_REJECT_TABLE, AcceptRejectValue } from '../lib/aqlTables';
 import {
   FinalInspection,
   QC_INSPECTORS,
@@ -1363,20 +1364,27 @@ export function FinalInspectionForm() {
       // Save to Firestore
       await addDoc(collection(db, 'final-inspections'), inspection);
 
-      // Generate PDF and send email
-      const recipients = await emailSettingsService.getRecipients();
+      // Generate PDF and send email (wrapped in try-catch to not fail submission)
+      try {
+        const recipients = await emailSettingsService.getRecipients();
 
-      // Auto-add merchant emails (primary and assistant) linked with buyer code
-      const merchantEmails = await getBuyerMerchantEmails(inspection.customerCode);
-      const allRecipients = [...recipients];
-      if (merchantEmails.primary && !allRecipients.includes(merchantEmails.primary)) {
-        allRecipients.push(merchantEmails.primary);
-      }
-      if (merchantEmails.assistant && !allRecipients.includes(merchantEmails.assistant)) {
-        allRecipients.push(merchantEmails.assistant);
-      }
+        // Auto-add merchant emails (primary and assistant) linked with buyer code
+        let merchantEmails: { primary?: string; assistant?: string } = {};
+        try {
+          merchantEmails = await getBuyerMerchantEmails(inspection.customerCode);
+        } catch (merchantError) {
+          console.warn('Failed to get merchant emails:', merchantError);
+        }
 
-      if (allRecipients.length > 0) {
+        const allRecipients = [...recipients];
+        if (merchantEmails.primary && !allRecipients.includes(merchantEmails.primary)) {
+          allRecipients.push(merchantEmails.primary);
+        }
+        if (merchantEmails.assistant && !allRecipients.includes(merchantEmails.assistant)) {
+          allRecipients.push(merchantEmails.assistant);
+        }
+
+        if (allRecipients.length > 0) {
         const pdfBase64 = await generateFinalInspectionPDF(inspection);
 
         const allPhotos = [
@@ -1539,6 +1547,10 @@ export function FinalInspectionForm() {
           console.warn('Email sending error (inspection saved successfully):', emailError);
           // Don't block submission if email fails
         }
+        }
+      } catch (emailSetupError) {
+        console.warn('Email setup error (inspection saved successfully):', emailSetupError);
+        // Don't block submission if email setup fails - inspection was already saved
       }
 
       setSuccess(true);
@@ -3064,8 +3076,8 @@ export function FinalInspectionForm() {
       {/* AQL Reference Chart Modal */}
       {showAqlChart && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setShowAqlChart(false)}>
-          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white rounded-t-xl">
+          <div className="bg-white rounded-xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white rounded-t-xl z-10">
               <h3 className="text-lg font-semibold text-gray-900">AQL Z1.4-2008 Reference Chart</h3>
               <button
                 type="button"
@@ -3076,14 +3088,95 @@ export function FinalInspectionForm() {
               </button>
             </div>
             <div className="p-4">
-              <img
-                src="/img/aql_chart_gemini3.png"
-                alt="AQL Z1.4-2008 Reference Chart"
-                className="w-full h-auto rounded-lg"
-              />
-              <p className="text-sm text-gray-500 mt-3 text-center">
-                Level II Normal Inspection • ANSI/ASQ Z1.4-2008 Standard
-              </p>
+              <h4 className="text-center text-xl font-bold text-teal-700 mb-1">AQL Z1.4-2008</h4>
+              <p className="text-center text-sm text-gray-600 mb-4">Level II Normal Inspection</p>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Lot Size to Code Table */}
+                <div>
+                  <h5 className="text-sm font-semibold text-teal-600 mb-2 text-center">LOT SIZE → CODE</h5>
+                  <table className="w-full text-sm border-collapse">
+                    <thead>
+                      <tr className="bg-teal-50">
+                        <th className="border border-teal-200 px-2 py-1 text-left">Lot Size</th>
+                        <th className="border border-teal-200 px-2 py-1 text-center">Code</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {LOT_SIZE_CODE_LETTERS.map((range, idx) => (
+                        <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                          <td className="border border-gray-200 px-2 py-1">
+                            {range.max === Infinity ? `${range.min.toLocaleString()}+` : `${range.min.toLocaleString()}-${range.max.toLocaleString()}`} →
+                          </td>
+                          <td className="border border-gray-200 px-2 py-1 text-center font-semibold text-teal-700">
+                            {range.codeLetter}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Accept/Reject Table */}
+                <div>
+                  <h5 className="text-sm font-semibold text-teal-600 mb-2 text-center">ACCEPT / REJECT BY AQL</h5>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm border-collapse">
+                      <thead>
+                        <tr className="bg-teal-50">
+                          <th className="border border-teal-200 px-1 py-1 text-center">Code</th>
+                          <th className="border border-teal-200 px-1 py-1 text-center">Sample</th>
+                          <th className="border border-teal-200 px-1 py-1 text-center" colSpan={2}>AQL 1.0</th>
+                          <th className="border border-teal-200 px-1 py-1 text-center" colSpan={2}>AQL 2.5</th>
+                          <th className="border border-teal-200 px-1 py-1 text-center" colSpan={2}>AQL 4.0</th>
+                        </tr>
+                        <tr className="bg-teal-50 text-xs">
+                          <th className="border border-teal-200 px-1 py-0.5"></th>
+                          <th className="border border-teal-200 px-1 py-0.5"></th>
+                          <th className="border border-teal-200 px-1 py-0.5 text-green-600">Ac</th>
+                          <th className="border border-teal-200 px-1 py-0.5 text-red-600">Re</th>
+                          <th className="border border-teal-200 px-1 py-0.5 text-green-600">Ac</th>
+                          <th className="border border-teal-200 px-1 py-0.5 text-red-600">Re</th>
+                          <th className="border border-teal-200 px-1 py-0.5 text-green-600">Ac</th>
+                          <th className="border border-teal-200 px-1 py-0.5 text-red-600">Re</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'P', 'Q'].map((code, idx) => {
+                          const aqlValues = AQL_ACCEPT_REJECT_TABLE[code];
+                          const renderCell = (value: AcceptRejectValue | undefined) => {
+                            if (!value || value === 'down') return <span className="text-gray-400">↓</span>;
+                            if (value === 'up') return <span className="text-gray-400">↑</span>;
+                            return value.accept;
+                          };
+                          const renderRejectCell = (value: AcceptRejectValue | undefined) => {
+                            if (!value || value === 'down') return <span className="text-gray-400">↓</span>;
+                            if (value === 'up') return <span className="text-gray-400">↑</span>;
+                            return value.reject;
+                          };
+                          return (
+                            <tr key={code} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                              <td className="border border-gray-200 px-1 py-1 text-center font-semibold text-teal-700">{code}</td>
+                              <td className="border border-gray-200 px-1 py-1 text-center">{SAMPLE_SIZES[code]}</td>
+                              <td className="border border-gray-200 px-1 py-1 text-center text-green-600">{renderCell(aqlValues?.['1.0'])}</td>
+                              <td className="border border-gray-200 px-1 py-1 text-center text-red-600">{renderRejectCell(aqlValues?.['1.0'])}</td>
+                              <td className="border border-gray-200 px-1 py-1 text-center text-green-600">{renderCell(aqlValues?.['2.5'])}</td>
+                              <td className="border border-gray-200 px-1 py-1 text-center text-red-600">{renderRejectCell(aqlValues?.['2.5'])}</td>
+                              <td className="border border-gray-200 px-1 py-1 text-center text-green-600">{renderCell(aqlValues?.['4.0'])}</td>
+                              <td className="border border-gray-200 px-1 py-1 text-center text-red-600">{renderRejectCell(aqlValues?.['4.0'])}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 text-xs text-gray-500 text-center space-y-1">
+                <p><span className="text-green-600 font-medium">Ac</span> = Accept if defects ≤ | <span className="text-red-600 font-medium">Re</span> = Reject if defects ≥ | <span className="text-gray-400">↓</span> = Use next larger sample</p>
+                <p className="font-medium">Level II Normal Inspection • ANSI/ASQ Z1.4-2008 Standard</p>
+              </div>
             </div>
           </div>
         </div>
