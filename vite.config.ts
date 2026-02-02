@@ -18,6 +18,9 @@ export default defineConfig({
         orientation: 'portrait',
         scope: '/',
         start_url: '/',
+        // Improved PWA settings for better mobile experience
+        categories: ['business', 'productivity'],
+        prefer_related_applications: false,
         icons: [
           {
             src: 'icon-192.svg',
@@ -42,14 +45,43 @@ export default defineConfig({
       workbox: {
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MB
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // Skip waiting so new service worker activates immediately
+        skipWaiting: true,
+        clientsClaim: true,
+        // Navigation preload for faster page loads
+        navigationPreload: true,
         runtimeCaching: [
+          {
+            // Cache Google Fonts
+            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'google-fonts-stylesheets',
+              expiration: {
+                maxEntries: 10,
+                maxAgeSeconds: 60 * 60 * 24 * 365 // 1 year
+              }
+            }
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts-webfonts',
+              expiration: {
+                maxEntries: 30,
+                maxAgeSeconds: 60 * 60 * 24 * 365 // 1 year
+              }
+            }
+          },
           {
             urlPattern: /^https:\/\/firestore\.googleapis\.com\/.*/i,
             handler: 'NetworkFirst',
             options: {
               cacheName: 'firestore-cache',
+              networkTimeoutSeconds: 10, // Fall back to cache after 10 seconds
               expiration: {
-                maxEntries: 50,
+                maxEntries: 100,
                 maxAgeSeconds: 60 * 60 * 24 // 24 hours
               }
             }
@@ -60,12 +92,42 @@ export default defineConfig({
             options: {
               cacheName: 'firebase-storage-cache',
               expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 60 * 60 * 24 * 7 // 7 days
+                maxEntries: 200,
+                maxAgeSeconds: 60 * 60 * 24 * 30 // 30 days
+              }
+            }
+          },
+          {
+            // Cache Firebase auth
+            urlPattern: /^https:\/\/.*\.firebaseio\.com\/.*/i,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'firebase-realtime-cache',
+              networkTimeoutSeconds: 10,
+              expiration: {
+                maxEntries: 50,
+                maxAgeSeconds: 60 * 60 * 24
+              }
+            }
+          },
+          {
+            // Cache Netlify functions for offline graceful degradation
+            urlPattern: /^\/.netlify\/functions\/.*/i,
+            handler: 'NetworkOnly',
+            options: {
+              backgroundSync: {
+                name: 'netlify-functions-queue',
+                options: {
+                  maxRetentionTime: 60 * 60 * 24 // 24 hours
+                }
               }
             }
           }
         ]
+      },
+      // Dev options for better debugging
+      devOptions: {
+        enabled: false // Set to true for debugging PWA in dev mode
       }
     })
   ],

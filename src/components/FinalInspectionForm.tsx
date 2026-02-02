@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { collection, addDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage, getCustomers, addCustomer, getDesignNames, addDesignName, DesignName, getOpsByNumber, getOpsList, OpsOrder, OpsOrderItem, getBuyerMerchantEmails } from '../lib/firebase';
@@ -6,6 +6,17 @@ import { emailSettingsService } from '../lib/emailSettingsService';
 import { generateFinalInspectionPDF } from '../lib/pdfGenerator';
 import { calculateAql, wouldPass, AqlCalculationResult } from '../lib/aqlCalculator';
 import { LOT_SIZE_CODE_LETTERS, SAMPLE_SIZES, AQL_ACCEPT_REJECT_TABLE, AcceptRejectValue } from '../lib/aqlTables';
+import {
+  savePhotoDraft,
+  loadPhotoDraft,
+  clearPhotoDraft,
+  createVisibilityHandler,
+  createBeforeUnloadHandler,
+  createPageHideHandler,
+  debounce,
+  PhotoDraftData,
+  DRAFT_STORAGE_KEY
+} from '../lib/draftPersistence';
 import {
   FinalInspection,
   QC_INSPECTORS,
@@ -29,9 +40,6 @@ import {
   COMPANY_NAMES
 } from '../types';
 import { Loader2, Upload, X, Camera, CheckCircle2, XCircle, Plus, Save, Search, Package, AlertCircle, ChevronDown, Calculator, Info } from 'lucide-react';
-
-// Draft storage key
-const DRAFT_STORAGE_KEY = 'finalInspectionDraft';
 
 // Draft interface
 interface DraftData {
@@ -582,32 +590,15 @@ export function FinalInspectionForm() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Load draft from localStorage on mount
-  useEffect(() => {
-    try {
-      const savedDraft = localStorage.getItem(DRAFT_STORAGE_KEY);
-      if (savedDraft) {
-        const draft: DraftData = JSON.parse(savedDraft);
-        setFormData(draft.formData);
-        setDefects(draft.defects);
-        setSelectedSizes(draft.selectedSizes);
-        setSizeUnit(draft.sizeUnit);
-        setLastSavedAt(draft.savedAt);
-        setDraftRestored(true);
-        // Hide the notification after 5 seconds
-        setTimeout(() => setDraftRestored(false), 5000);
-        console.log('Draft restored from', draft.savedAt);
-      }
-    } catch (error) {
-      console.error('Error loading draft:', error);
-    }
-  }, []);
+  // Save draft function - saves form data to localStorage and photos to IndexedDB
+  const saveDraftRef = useRef<() => void>();
 
-  // Save draft function
-  const saveDraft = () => {
+  const saveDraft = useCallback(() => {
     try {
       setDraftSaving(true);
       const now = new Date().toLocaleString();
+
+      // Save form data to localStorage
       const draft: DraftData = {
         formData,
         defects,
@@ -616,6 +607,27 @@ export function FinalInspectionForm() {
         savedAt: now
       };
       localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+
+      // Save photo previews to IndexedDB (async, don't wait)
+      const photoDraft: PhotoDraftData = {
+        photoPreviews,
+        constructionPreviews,
+        notOkPreviews,
+        stackedGoodsPreview,
+        consumerPiecePreviews: consumerPieces.map(p => ({
+          label: p.label,
+          preview: p.preview || '' // Use the base64 preview already stored
+        })),
+        unitLoadPreviews: unitLoadPhotos.map(p => ({
+          label: p.label,
+          preview: p.preview || '' // Use the base64 preview already stored
+        })),
+        otherPreviews,
+        unitLoadEnabled,
+        savedAt: now
+      };
+      savePhotoDraft(photoDraft).catch(console.error);
+
       setLastSavedAt(now);
       setDraftSaved(true);
       setTimeout(() => setDraftSaved(false), 2000);
@@ -625,29 +637,150 @@ export function FinalInspectionForm() {
     } finally {
       setDraftSaving(false);
     }
-  };
+  }, [formData, defects, selectedSizes, sizeUnit, photoPreviews, constructionPreviews, notOkPreviews, stackedGoodsPreview, consumerPieces, unitLoadPhotos, otherPreviews, unitLoadEnabled]);
+
+  // Keep ref updated for event handlers that capture stale closures
+  useEffect(() => {
+    saveDraftRef.current = saveDraft;
+  }, [saveDraft]);
+
+  // Load draft from localStorage and IndexedDB on mount
+  useEffect(() => {
+    const loadDrafts = async () => {
+      try {
+        // Load form data from localStorage
+        const savedDraft = localStorage.getItem(DRAFT_STORAGE_KEY);
+        if (savedDraft) {
+          const draft: DraftData = JSON.parse(savedDraft);
+          setFormData(draft.formData);
+          setDefects(draft.defects);
+          setSelectedSizes(draft.selectedSizes);
+          setSizeUnit(draft.sizeUnit);
+          setLastSavedAt(draft.savedAt);
+          setDraftRestored(true);
+          setTimeout(() => setDraftRestored(false), 5000);
+          console.log('Form draft restored from', draft.savedAt);
+        }
+
+        // Load photo previews from IndexedDB
+        const photoDraft = await loadPhotoDraft();
+        if (photoDraft) {
+          setPhotoPreviews(photoDraft.photoPreviews);
+          setConstructionPreviews(photoDraft.constructionPreviews);
+          setNotOkPreviews(photoDraft.notOkPreviews);
+          setStackedGoodsPreview(photoDraft.stackedGoodsPreview);
+          setOtherPreviews(photoDraft.otherPreviews);
+          setUnitLoadEnabled(photoDraft.unitLoadEnabled);
+
+          // Restore consumer pieces with previews (files will need to be re-uploaded)
+          if (photoDraft.consumerPiecePreviews?.length > 0) {
+            setConsumerPieces(photoDraft.consumerPiecePreviews.map(p => ({
+              label: p.label,
+              preview: p.preview,
+              file: undefined // File objects can't be persisted, but previews are preserved
+            })));
+          }
+
+          // Restore unit load photos with previews
+          if (photoDraft.unitLoadPreviews?.length > 0) {
+            setUnitLoadPhotos(photoDraft.unitLoadPreviews.map(p => ({
+              label: p.label,
+              preview: p.preview,
+              file: undefined
+            })));
+          }
+
+          console.log('Photo previews restored from IndexedDB');
+        }
+      } catch (error) {
+        console.error('Error loading draft:', error);
+      }
+    };
+
+    loadDrafts();
+  }, []);
 
   // Clear draft function
-  const clearDraft = () => {
+  const clearDraft = useCallback(() => {
     try {
       localStorage.removeItem(DRAFT_STORAGE_KEY);
+      clearPhotoDraft().catch(console.error);
       setLastSavedAt(null);
     } catch (error) {
       console.error('Error clearing draft:', error);
     }
-  };
+  }, []);
 
-  // Auto-save draft every 30 seconds
+  // Debounced auto-save - triggers 3 seconds after changes stop
+  const debouncedSave = useCallback(
+    debounce(() => {
+      if (saveDraftRef.current) {
+        saveDraftRef.current();
+      }
+    }, 3000),
+    []
+  );
+
+  // Trigger debounced save on form data changes
+  useEffect(() => {
+    // Only auto-save if there's meaningful data
+    if (formData.customerName || formData.opsNo || formData.buyerDesignName) {
+      debouncedSave();
+    }
+  }, [formData, defects, selectedSizes, sizeUnit, debouncedSave]);
+
+  // Also trigger debounced save on photo changes
+  useEffect(() => {
+    const hasPhotos = Object.values(photoPreviews).some(p => p) ||
+      Object.values(constructionPreviews).some(p => p) ||
+      stackedGoodsPreview ||
+      consumerPieces.length > 0 ||
+      otherPreviews.length > 0;
+
+    if (hasPhotos) {
+      debouncedSave();
+    }
+  }, [photoPreviews, constructionPreviews, stackedGoodsPreview, consumerPieces, otherPreviews, debouncedSave]);
+
+  // Backup: Interval-based auto-save every 30 seconds
   useEffect(() => {
     const interval = setInterval(() => {
-      // Only auto-save if there's meaningful data
       if (formData.customerName || formData.opsNo || formData.buyerDesignName) {
-        saveDraft();
+        if (saveDraftRef.current) {
+          saveDraftRef.current();
+        }
       }
-    }, 30000); // 30 seconds
+    }, 30000);
 
     return () => clearInterval(interval);
-  }, [formData, defects, selectedSizes, sizeUnit]);
+  }, [formData.customerName, formData.opsNo, formData.buyerDesignName]);
+
+  // Save draft immediately when page loses visibility (phone call, app switch)
+  useEffect(() => {
+    const cleanupVisibility = createVisibilityHandler(() => {
+      if (saveDraftRef.current) {
+        saveDraftRef.current();
+      }
+    });
+
+    const cleanupPageHide = createPageHideHandler(() => {
+      if (saveDraftRef.current) {
+        saveDraftRef.current();
+      }
+    });
+
+    const cleanupBeforeUnload = createBeforeUnloadHandler(() => {
+      if (saveDraftRef.current) {
+        saveDraftRef.current();
+      }
+    });
+
+    return () => {
+      cleanupVisibility();
+      cleanupPageHide();
+      cleanupBeforeUnload();
+    };
+  }, []);
 
   // Load custom options from localStorage on mount
   useEffect(() => {
@@ -2432,8 +2565,15 @@ export function FinalInspectionForm() {
                     <img
                       src={piece.preview}
                       alt={piece.label || 'Consumer Piece'}
-                      className="w-full h-28 object-cover rounded-lg"
+                      className={`w-full h-28 object-cover rounded-lg ${!piece.file ? 'border-2 border-amber-400' : ''}`}
                     />
+                    {/* Show warning if preview exists but file is missing (restored from draft) */}
+                    {!piece.file && (
+                      <div className="absolute bottom-1 left-1 right-1 bg-amber-100 text-amber-800 text-xs px-1 py-0.5 rounded flex items-center gap-1">
+                        <AlertCircle size={10} />
+                        <span>Re-select to upload</span>
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleConsumerPiecePhoto(index, null)}
@@ -2531,8 +2671,15 @@ export function FinalInspectionForm() {
                         <img
                           src={photo.preview}
                           alt={photo.label || 'Unit Load'}
-                          className="w-full h-28 object-cover rounded-lg"
+                          className={`w-full h-28 object-cover rounded-lg ${!photo.file ? 'border-2 border-amber-400' : ''}`}
                         />
+                        {/* Show warning if preview exists but file is missing (restored from draft) */}
+                        {!photo.file && (
+                          <div className="absolute bottom-1 left-1 right-1 bg-amber-100 text-amber-800 text-xs px-1 py-0.5 rounded flex items-center gap-1">
+                            <AlertCircle size={10} />
+                            <span>Re-select to upload</span>
+                          </div>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleUnitLoadPhotoChange(index, null)}
