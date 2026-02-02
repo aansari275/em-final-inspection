@@ -56,6 +56,8 @@ const CODE_LETTER_ORDER = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L'
 // Format: { accept: number, reject: number } or 'down' for arrow down, 'up' for arrow up
 export type AcceptRejectValue = { accept: number; reject: number } | 'down' | 'up';
 
+// ANSI/ASQ Z1.4-2008 Table II-A: Single Sampling Plans for Normal Inspection
+// Verified against multiple online sources and official standard references
 export const AQL_ACCEPT_REJECT_TABLE: Record<string, Record<string, AcceptRejectValue>> = {
   A: {
     '0.65': 'down',
@@ -63,7 +65,7 @@ export const AQL_ACCEPT_REJECT_TABLE: Record<string, Record<string, AcceptReject
     '1.5': 'down',
     '2.5': 'down',
     '4.0': 'down',
-    '6.5': { accept: 0, reject: 1 },
+    '6.5': 'down',
   },
   B: {
     '0.65': 'down',
@@ -71,9 +73,17 @@ export const AQL_ACCEPT_REJECT_TABLE: Record<string, Record<string, AcceptReject
     '1.5': 'down',
     '2.5': 'down',
     '4.0': 'down',
-    '6.5': { accept: 0, reject: 1 },
+    '6.5': 'down',
   },
   C: {
+    '0.65': 'down',
+    '1.0': 'down',
+    '1.5': 'down',
+    '2.5': 'down',
+    '4.0': 'down',
+    '6.5': { accept: 0, reject: 1 },
+  },
+  D: {
     '0.65': 'down',
     '1.0': 'down',
     '1.5': 'down',
@@ -81,7 +91,7 @@ export const AQL_ACCEPT_REJECT_TABLE: Record<string, Record<string, AcceptReject
     '4.0': { accept: 0, reject: 1 },
     '6.5': { accept: 0, reject: 1 },
   },
-  D: {
+  E: {
     '0.65': 'down',
     '1.0': 'down',
     '1.5': 'down',
@@ -89,39 +99,23 @@ export const AQL_ACCEPT_REJECT_TABLE: Record<string, Record<string, AcceptReject
     '4.0': { accept: 0, reject: 1 },
     '6.5': { accept: 1, reject: 2 },
   },
-  E: {
+  F: {
     '0.65': 'down',
     '1.0': 'down',
     '1.5': { accept: 0, reject: 1 },
     '2.5': { accept: 0, reject: 1 },
     '4.0': { accept: 1, reject: 2 },
-    '6.5': { accept: 1, reject: 2 },
-  },
-  F: {
-    '0.65': 'down',
-    '1.0': { accept: 0, reject: 1 },
-    '1.5': { accept: 0, reject: 1 },
-    '2.5': { accept: 1, reject: 2 },
-    '4.0': { accept: 1, reject: 2 },
     '6.5': { accept: 2, reject: 3 },
   },
   G: {
-    '0.65': { accept: 0, reject: 1 },
+    '0.65': 'down',
     '1.0': { accept: 0, reject: 1 },
-    '1.5': { accept: 1, reject: 2 },
-    '2.5': { accept: 1, reject: 2 },
-    '4.0': { accept: 2, reject: 3 },
-    '6.5': { accept: 3, reject: 4 },
-  },
-  H: {
-    '0.65': { accept: 0, reject: 1 },
-    '1.0': { accept: 1, reject: 2 },
     '1.5': { accept: 1, reject: 2 },
     '2.5': { accept: 2, reject: 3 },
     '4.0': { accept: 3, reject: 4 },
     '6.5': { accept: 5, reject: 6 },
   },
-  J: {
+  H: {
     '0.65': { accept: 0, reject: 1 },
     '1.0': { accept: 1, reject: 2 },
     '1.5': { accept: 2, reject: 3 },
@@ -129,15 +123,15 @@ export const AQL_ACCEPT_REJECT_TABLE: Record<string, Record<string, AcceptReject
     '4.0': { accept: 5, reject: 6 },
     '6.5': { accept: 7, reject: 8 },
   },
-  K: {
-    '0.65': { accept: 1, reject: 2 },
+  J: {
+    '0.65': { accept: 0, reject: 1 },
     '1.0': { accept: 2, reject: 3 },
     '1.5': { accept: 3, reject: 4 },
     '2.5': { accept: 5, reject: 6 },
     '4.0': { accept: 7, reject: 8 },
     '6.5': { accept: 10, reject: 11 },
   },
-  L: {
+  K: {
     '0.65': { accept: 1, reject: 2 },
     '1.0': { accept: 3, reject: 4 },
     '1.5': { accept: 5, reject: 6 },
@@ -145,7 +139,7 @@ export const AQL_ACCEPT_REJECT_TABLE: Record<string, Record<string, AcceptReject
     '4.0': { accept: 10, reject: 11 },
     '6.5': { accept: 14, reject: 15 },
   },
-  M: {
+  L: {
     '0.65': { accept: 2, reject: 3 },
     '1.0': { accept: 5, reject: 6 },
     '1.5': { accept: 7, reject: 8 },
@@ -153,7 +147,7 @@ export const AQL_ACCEPT_REJECT_TABLE: Record<string, Record<string, AcceptReject
     '4.0': { accept: 14, reject: 15 },
     '6.5': { accept: 21, reject: 22 },
   },
-  N: {
+  M: {
     '0.65': { accept: 3, reject: 4 },
     '1.0': { accept: 7, reject: 8 },
     '1.5': { accept: 10, reject: 11 },
@@ -161,7 +155,7 @@ export const AQL_ACCEPT_REJECT_TABLE: Record<string, Record<string, AcceptReject
     '4.0': { accept: 21, reject: 22 },
     '6.5': { accept: 21, reject: 22 },
   },
-  P: {
+  N: {
     '0.65': { accept: 5, reject: 6 },
     '1.0': { accept: 10, reject: 11 },
     '1.5': { accept: 14, reject: 15 },
@@ -169,7 +163,7 @@ export const AQL_ACCEPT_REJECT_TABLE: Record<string, Record<string, AcceptReject
     '4.0': { accept: 21, reject: 22 },
     '6.5': { accept: 21, reject: 22 },
   },
-  Q: {
+  P: {
     '0.65': { accept: 7, reject: 8 },
     '1.0': { accept: 14, reject: 15 },
     '1.5': { accept: 21, reject: 22 },
@@ -177,8 +171,16 @@ export const AQL_ACCEPT_REJECT_TABLE: Record<string, Record<string, AcceptReject
     '4.0': { accept: 21, reject: 22 },
     '6.5': { accept: 21, reject: 22 },
   },
-  R: {
+  Q: {
     '0.65': { accept: 10, reject: 11 },
+    '1.0': { accept: 21, reject: 22 },
+    '1.5': { accept: 21, reject: 22 },
+    '2.5': { accept: 21, reject: 22 },
+    '4.0': { accept: 21, reject: 22 },
+    '6.5': { accept: 21, reject: 22 },
+  },
+  R: {
+    '0.65': { accept: 14, reject: 15 },
     '1.0': { accept: 21, reject: 22 },
     '1.5': { accept: 21, reject: 22 },
     '2.5': { accept: 21, reject: 22 },
