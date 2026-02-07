@@ -149,9 +149,11 @@ All OK/NOT OK checks:
 - **Camera AND gallery upload supported** (no forced camera-only on mobile)
 
 ### PDF Export
-- Professional formatted PDF with all sections
+- Professional bordered-table layout (Excel-style with cell borders)
 - Inspected Articles table (when available)
-- **2 photos per page** in grid layout (aspect ratio preserved)
+- **4-column photo grid** with all images cropped to consistent 4:3 landscape frames
+- All photos uniform size regardless of original orientation (no portrait/landscape mix)
+- Photo labels show actual field values (e.g., "Net Weight: 3.5 kgs", "Pile Height: 12mm")
 - Color-coded OK/NOT OK/NA status
 - AQL Z1.4-2008 calculation details included
 
