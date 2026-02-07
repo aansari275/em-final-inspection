@@ -4,8 +4,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage, getCustomers, addCustomer, getDesignNames, addDesignName, DesignName, getOpsByNumber, getOpsList, OpsOrder, OpsOrderItem, getBuyerMerchantEmails } from '../lib/firebase';
 import { emailSettingsService } from '../lib/emailSettingsService';
 import { generateFinalInspectionPDF } from '../lib/pdfGenerator';
-import { calculateAql, wouldPass, AqlCalculationResult } from '../lib/aqlCalculator';
-import { LOT_SIZE_CODE_LETTERS, SAMPLE_SIZES, AQL_ACCEPT_REJECT_TABLE, AcceptRejectValue } from '../lib/aqlTables';
+import { calculateAql, wouldPass, AqlCalculationResult, LOT_SIZE_CODE_LETTERS, SAMPLE_SIZES, AQL_ACCEPT_REJECT_TABLE, AcceptRejectValue } from '../lib/aqlCalculator';
 import {
   savePhotoDraft,
   loadPhotoDraft,
@@ -533,6 +532,67 @@ export function FinalInspectionForm() {
   const [isAutoResult, setIsAutoResult] = useState(false);
   const [resultOverridden, setResultOverridden] = useState(false);
   const [showAqlChart, setShowAqlChart] = useState(false);
+
+  // Photo state declarations - must be before saveDraft useCallback that references them
+  const [notOkPhotos, setNotOkPhotos] = useState<Record<string, File | null>>({});
+  const [notOkPreviews, setNotOkPreviews] = useState<Record<string, string>>({});
+
+  const [photos, setPhotos] = useState<Record<PhotoKey, File | null>>({
+    approvedSamplePhoto: null,
+    redSealFrontPhoto: null,
+    redSealBackPhoto: null,
+    redSealCloseUpPhoto: null,
+    redSealProductFront: null,
+    redSealProductBack: null,
+    labelPhoto: null,
+    moisturePhoto: null,
+    sizeFrontPhoto: null,
+    sizeSidePhoto: null,
+    inspectedSamplesPhoto: null,
+    metalCheckingPhoto: null,
+  });
+
+  const [photoPreviews, setPhotoPreviews] = useState<Record<PhotoKey, string>>({
+    approvedSamplePhoto: '',
+    redSealFrontPhoto: '',
+    redSealBackPhoto: '',
+    redSealCloseUpPhoto: '',
+    redSealProductFront: '',
+    redSealProductBack: '',
+    labelPhoto: '',
+    moisturePhoto: '',
+    sizeFrontPhoto: '',
+    sizeSidePhoto: '',
+    inspectedSamplesPhoto: '',
+    metalCheckingPhoto: '',
+  });
+
+  const [constructionPhotos, setConstructionPhotos] = useState<Record<ConstructionPhotoKey, File | null>>({
+    warpPer10cm: null,
+    weftPer10cm: null,
+    pileHeightPhoto: null,
+    productNetWeightPhoto: null,
+    productGrossWeightPhoto: null,
+  });
+
+  const [constructionPreviews, setConstructionPreviews] = useState<Record<ConstructionPhotoKey, string>>({
+    warpPer10cm: '',
+    weftPer10cm: '',
+    pileHeightPhoto: '',
+    productNetWeightPhoto: '',
+    productGrossWeightPhoto: '',
+  });
+
+  const [stackedGoodsPhoto, setStackedGoodsPhoto] = useState<File | null>(null);
+  const [stackedGoodsPreview, setStackedGoodsPreview] = useState<string>('');
+  const [consumerPieces, setConsumerPieces] = useState<LabeledPhoto[]>([]);
+  const [customConsumerLabels, setCustomConsumerLabels] = useState<string[]>([]);
+  const [unitLoadEnabled, setUnitLoadEnabled] = useState<boolean>(false);
+  const [unitLoadPhotos, setUnitLoadPhotos] = useState<LabeledPhoto[]>([]);
+  const [customUnitLoadLabels, setCustomUnitLoadLabels] = useState<string[]>([]);
+
+  const [otherPhotos, setOtherPhotos] = useState<File[]>([]);
+  const [otherPreviews, setOtherPreviews] = useState<string[]>([]);
 
   // Load customers from Firestore on mount
   useEffect(() => {
@@ -1144,10 +1204,7 @@ export function FinalInspectionForm() {
     }));
   };
 
-  // NOT OK photo state
-  const [notOkPhotos, setNotOkPhotos] = useState<Record<string, File | null>>({});
-  const [notOkPreviews, setNotOkPreviews] = useState<Record<string, string>>({});
-
+  // NOT OK photo handlers
   const handleNotOkPhotoChange = (fieldKey: string, file: File | null) => {
     setNotOkPhotos(prev => ({ ...prev, [fieldKey]: file }));
     if (file) {
@@ -1161,65 +1218,7 @@ export function FinalInspectionForm() {
     }
   };
 
-  const [photos, setPhotos] = useState<Record<PhotoKey, File | null>>({
-    approvedSamplePhoto: null,
-    redSealFrontPhoto: null,
-    redSealBackPhoto: null,
-    redSealCloseUpPhoto: null,
-    redSealProductFront: null,
-    redSealProductBack: null,
-    labelPhoto: null,
-    moisturePhoto: null,
-    sizeFrontPhoto: null,
-    sizeSidePhoto: null,
-    inspectedSamplesPhoto: null,
-    metalCheckingPhoto: null,
-  });
-
-  const [photoPreviews, setPhotoPreviews] = useState<Record<PhotoKey, string>>({
-    approvedSamplePhoto: '',
-    redSealFrontPhoto: '',
-    redSealBackPhoto: '',
-    redSealCloseUpPhoto: '',
-    redSealProductFront: '',
-    redSealProductBack: '',
-    labelPhoto: '',
-    moisturePhoto: '',
-    sizeFrontPhoto: '',
-    sizeSidePhoto: '',
-    inspectedSamplesPhoto: '',
-    metalCheckingPhoto: '',
-  });
-
-  // Construction photos state
-  const [constructionPhotos, setConstructionPhotos] = useState<Record<ConstructionPhotoKey, File | null>>({
-    warpPer10cm: null,
-    weftPer10cm: null,
-    pileHeightPhoto: null,
-    productNetWeightPhoto: null,
-    productGrossWeightPhoto: null,
-  });
-
-  const [constructionPreviews, setConstructionPreviews] = useState<Record<ConstructionPhotoKey, string>>({
-    warpPer10cm: '',
-    weftPer10cm: '',
-    pileHeightPhoto: '',
-    productNetWeightPhoto: '',
-    productGrossWeightPhoto: '',
-  });
-
-  // New Images section state
-  const [stackedGoodsPhoto, setStackedGoodsPhoto] = useState<File | null>(null);
-  const [stackedGoodsPreview, setStackedGoodsPreview] = useState<string>('');
-  const [consumerPieces, setConsumerPieces] = useState<LabeledPhoto[]>([]);
-  const [customConsumerLabels, setCustomConsumerLabels] = useState<string[]>([]);
-  const [unitLoadEnabled, setUnitLoadEnabled] = useState<boolean>(false);
-  const [unitLoadPhotos, setUnitLoadPhotos] = useState<LabeledPhoto[]>([]);
-  const [customUnitLoadLabels, setCustomUnitLoadLabels] = useState<string[]>([]);
-
-  const [otherPhotos, setOtherPhotos] = useState<File[]>([]);
-  const [otherPreviews, setOtherPreviews] = useState<string[]>([]);
-
+  // Photo handlers
   const handlePhotoChange = (key: PhotoKey, file: File | null) => {
     setPhotos(prev => ({ ...prev, [key]: file }));
     if (file) {

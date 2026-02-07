@@ -3,6 +3,20 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  build: {
+    // Use terser for minification - better scope analysis avoids name collisions
+    minify: 'terser',
+    rollupOptions: {
+      output: {
+        // Split vendor libraries into separate chunks for better caching
+        manualChunks: {
+          firebase: ['firebase/app', 'firebase/firestore', 'firebase/storage'],
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+          pdf: ['jspdf'],
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     VitePWA({

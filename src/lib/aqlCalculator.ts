@@ -11,6 +11,10 @@ import {
   AcceptRejectValue,
 } from './aqlTables';
 
+// Re-export for use by components (avoids diamond dependency issues in production builds)
+export { LOT_SIZE_CODE_LETTERS, SAMPLE_SIZES, AQL_ACCEPT_REJECT_TABLE };
+export type { AcceptRejectValue };
+
 export type InspectionLevel = 'I' | 'II' | 'III';
 
 export interface AqlCalculationResult {
