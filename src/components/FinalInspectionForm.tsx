@@ -38,7 +38,7 @@ import {
   SelectedArticle,
   COMPANY_NAMES
 } from '../types';
-import { Loader2, Upload, X, Camera, CheckCircle2, XCircle, Plus, Save, Search, Package, AlertCircle, ChevronDown, Calculator, Info } from 'lucide-react';
+import { Loader2, Upload, X, Camera, CheckCircle2, XCircle, Plus, Save, Search, Package, AlertCircle, ChevronDown, Calculator, Info, ImagePlus } from 'lucide-react';
 
 // Draft interface
 interface DraftData {
@@ -303,6 +303,75 @@ function CustomerDropdown({
   );
 }
 
+// Reusable photo input — single icon, tap shows Camera / Gallery popover
+function PhotoInputButtons({ onFileSelect, className, iconSize = 16, showLabel = false, labelText = 'Take Photo', multiple = false }: {
+  onFileSelect: (files: FileList | null) => void;
+  className?: string;
+  iconSize?: number;
+  showLabel?: boolean;
+  labelText?: string;
+  multiple?: boolean;
+}) {
+  const [showMenu, setShowMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
+
+  // Close menu on outside tap
+  useEffect(() => {
+    if (!showMenu) return;
+    const handle = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowMenu(false);
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [showMenu]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onFileSelect(e.target.files);
+    e.target.value = '';
+    setShowMenu(false);
+  };
+
+  return (
+    <div className={`relative ${className || ''}`} ref={menuRef}>
+      <button
+        type="button"
+        onClick={() => setShowMenu(v => !v)}
+        className="flex flex-col items-center justify-center w-full h-full border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
+      >
+        <Camera size={iconSize} className="text-gray-400" />
+        {showLabel && <span className="text-xs text-gray-500 mt-1">{labelText}</span>}
+      </button>
+
+      {showMenu && (
+        <div className="absolute z-50 left-1/2 -translate-x-1/2 mt-1 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden w-44 animate-in fade-in slide-in-from-top-1">
+          <button
+            type="button"
+            className="flex items-center gap-3 w-full px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+            onClick={() => { cameraRef.current?.click(); }}
+          >
+            <Camera size={18} className="text-gray-500" />
+            Take Photo
+          </button>
+          <hr className="border-gray-100" />
+          <button
+            type="button"
+            className="flex items-center gap-3 w-full px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+            onClick={() => { galleryRef.current?.click(); }}
+          >
+            <ImagePlus size={18} className="text-gray-500" />
+            Choose from Gallery
+          </button>
+        </div>
+      )}
+
+      <input ref={cameraRef} type="file" accept="image/*" capture="environment" multiple={multiple} className="hidden" onChange={handleChange} />
+      <input ref={galleryRef} type="file" accept="image/*" multiple={multiple} className="hidden" onChange={handleChange} />
+    </div>
+  );
+}
+
 // NOT OK photo component
 interface NotOkPhotoProps {
   fieldKey: string;
@@ -314,7 +383,26 @@ interface NotOkPhotoProps {
 }
 
 function NotOkPhotoUpload({ fieldLabel, isNotOk, preview, onPhotoChange }: NotOkPhotoProps) {
-  // Always show photo upload (not just when NOT OK)
+  const [showMenu, setShowMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!showMenu) return;
+    const handle = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowMenu(false);
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [showMenu]);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onPhotoChange(e.target.files?.[0] || null);
+    e.target.value = '';
+    setShowMenu(false);
+  };
+
   return (
     <div className="flex items-center">
       {preview ? (
@@ -329,15 +417,38 @@ function NotOkPhotoUpload({ fieldLabel, isNotOk, preview, onPhotoChange }: NotOk
           </button>
         </div>
       ) : (
-        <label className={`inline-flex items-center justify-center w-9 h-9 rounded-lg cursor-pointer border ${isNotOk ? 'border-red-300 text-red-500 hover:bg-red-50' : 'border-gray-200 text-gray-400 hover:bg-gray-50 hover:text-gray-600'}`}>
-          <Camera size={16} />
-          <input
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => onPhotoChange(e.target.files?.[0] || null)}
-          />
-        </label>
+        <div className="relative" ref={menuRef}>
+          <button
+            type="button"
+            onClick={() => setShowMenu(v => !v)}
+            className={`inline-flex items-center justify-center w-9 h-9 rounded-lg cursor-pointer border ${isNotOk ? 'border-red-300 text-red-500 hover:bg-red-50' : 'border-gray-200 text-gray-400 hover:bg-gray-50 hover:text-gray-600'}`}
+          >
+            <Camera size={16} />
+          </button>
+          {showMenu && (
+            <div className="absolute z-50 right-0 mt-1 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden w-44">
+              <button
+                type="button"
+                className="flex items-center gap-3 w-full px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+                onClick={() => cameraRef.current?.click()}
+              >
+                <Camera size={16} className="text-gray-500" />
+                Take Photo
+              </button>
+              <hr className="border-gray-100" />
+              <button
+                type="button"
+                className="flex items-center gap-3 w-full px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+                onClick={() => galleryRef.current?.click()}
+              >
+                <ImagePlus size={16} className="text-gray-500" />
+                Choose from Gallery
+              </button>
+            </div>
+          )}
+          <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFile} />
+          <input ref={galleryRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+        </div>
       )}
     </div>
   );
@@ -2737,17 +2848,12 @@ export function FinalInspectionForm() {
               </button>
             </div>
           ) : (
-            <label className="flex flex-col items-center justify-center w-full max-w-xs h-40 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
-              <Camera className="w-10 h-10 text-gray-400" />
-              <span className="text-sm text-gray-500 mt-2">Take Photo</span>
-              <span className="text-xs text-gray-400">or Upload</span>
-              <input
-                type="file"
-                accept="image/*"
-                    className="hidden"
-                onChange={(e) => handleStackedGoodsChange(e.target.files?.[0] || null)}
-              />
-            </label>
+            <PhotoInputButtons
+              onFileSelect={(files) => handleStackedGoodsChange(files?.[0] || null)}
+              className="w-full max-w-xs h-40"
+              iconSize={24}
+              showLabel={true}
+            />
           )}
         </div>
 
@@ -2810,16 +2916,12 @@ export function FinalInspectionForm() {
                     </button>
                   </div>
                 ) : (
-                  <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                    <Camera className="w-6 h-6 text-gray-400" />
-                    <span className="text-xs text-gray-500 mt-1">Take/Upload</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                                className="hidden"
-                      onChange={(e) => handleConsumerPiecePhoto(index, e.target.files?.[0] || null)}
-                    />
-                  </label>
+                  <PhotoInputButtons
+                    onFileSelect={(files) => handleConsumerPiecePhoto(index, files?.[0] || null)}
+                    className="w-full h-28"
+                    iconSize={20}
+                    showLabel={true}
+                  />
                 )}
                 {/* Remove button */}
                 <button
@@ -2915,16 +3017,12 @@ export function FinalInspectionForm() {
                         </button>
                       </div>
                     ) : (
-                      <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                        <Camera className="w-6 h-6 text-gray-400" />
-                        <span className="text-xs text-gray-500 mt-1">Take/Upload</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                                        className="hidden"
-                          onChange={(e) => handleUnitLoadPhotoChange(index, e.target.files?.[0] || null)}
-                        />
-                      </label>
+                      <PhotoInputButtons
+                        onFileSelect={(files) => handleUnitLoadPhotoChange(index, files?.[0] || null)}
+                        className="w-full h-28"
+                        iconSize={20}
+                        showLabel={true}
+                      />
                     )}
                     {/* Remove button */}
                     <button
@@ -2980,17 +3078,12 @@ export function FinalInspectionForm() {
                   </button>
                 </div>
               ) : (
-                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                  <Camera className="w-8 h-8 text-gray-400" />
-                  <span className="text-xs text-gray-500 mt-1">Take Photo</span>
-                  <span className="text-xs text-gray-400">or Upload</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                            className="hidden"
-                    onChange={(e) => handleConstructionPhotoChange(key as ConstructionPhotoKey, e.target.files?.[0] || null)}
-                  />
-                </label>
+                <PhotoInputButtons
+                  onFileSelect={(files) => handleConstructionPhotoChange(key as ConstructionPhotoKey, files?.[0] || null)}
+                  className="w-full h-32"
+                  iconSize={24}
+                  showLabel={true}
+                />
               )}
             </div>
           ))}
@@ -3211,17 +3304,12 @@ export function FinalInspectionForm() {
                   </button>
                 </div>
               ) : (
-                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                  <Camera className="w-8 h-8 text-gray-400" />
-                  <span className="text-xs text-gray-500 mt-1">Take Photo</span>
-                  <span className="text-xs text-gray-400">or Upload</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                            className="hidden"
-                    onChange={(e) => handlePhotoChange(key as PhotoKey, e.target.files?.[0] || null)}
-                  />
-                </label>
+                <PhotoInputButtons
+                  onFileSelect={(files) => handlePhotoChange(key as PhotoKey, files?.[0] || null)}
+                  className="w-full h-32"
+                  iconSize={24}
+                  showLabel={true}
+                />
               )}
             </div>
           ))}
@@ -3248,17 +3336,13 @@ export function FinalInspectionForm() {
               </div>
             ))}
           </div>
-          <label className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-            <Camera size={18} />
-            <span>Take/Upload Photos</span>
-            <input
-              type="file"
-              accept="image/*"
-                multiple
-              className="hidden"
-              onChange={(e) => handleOtherPhotosChange(e.target.files)}
-            />
-          </label>
+          <PhotoInputButtons
+            onFileSelect={(files) => handleOtherPhotosChange(files)}
+            className="w-full max-w-xs"
+            iconSize={20}
+            showLabel={true}
+            multiple={true}
+          />
         </div>
       </div>
 
