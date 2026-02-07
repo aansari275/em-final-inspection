@@ -75,7 +75,7 @@ Main entry point for the form:
 
 ### 6. Quantities & Sampling (AQL Z1.4-2008)
 - Total Order Qty, Inspected Lot Qty
-- AQL Level (0.65, 1.0, 1.5, 2.5, 4.0, 6.5)
+- AQL Level: Fixed at 2.5 (company standard for final inspections)
 - **AQL Auto-Calculation Panel:**
   - Code Letter (auto-calculated from lot size)
   - Sample Size (auto-filled from Z1.4 table)
@@ -146,6 +146,7 @@ All OK/NOT OK checks:
 - Labeled photos for Consumer Pieces and Unit Load
 - Custom labels saved to localStorage
 - All photos uploaded to Firebase Storage
+- **Camera AND gallery upload supported** (no forced camera-only on mobile)
 
 ### PDF Export
 - Professional formatted PDF with all sections
@@ -173,16 +174,19 @@ All OK/NOT OK checks:
 - **Offline support** with service worker caching
 - **App icon** with green checkmark branding
 - Standalone mode (no browser UI)
-- Auto-updates when new version deployed
+- **Prompt-based updates** (user chooses when to update, prevents data loss)
+- Keep-alive mechanism prevents OS from killing PWA during long inspections
 
 ### AQL Z1.4-2008 Auto-Calculation
 Implements ANSI/ASQ Z1.4-2008 standard for acceptance sampling:
+- **Fixed AQL:** 2.5 (company standard, no dropdown selection needed)
 - **Default Level:** General Inspection Level II
 - **Auto-calculates on lot size entry:**
   - Code letter from lot size ranges
-  - Sample size from Z1.4 tables
-  - Accept/Reject thresholds for selected AQL
+  - Sample size from Z1.4 tables (capped at lot size for small lots)
+  - Accept/Reject thresholds for AQL 2.5
 - **Arrow handling:** Automatically uses larger sample when needed
+- **100% inspection rule:** When sample size exceeds lot size, caps at lot size
 - **Auto PASS/FAIL:** Determines result based on rejected qty
 - **Inspector override:** Can manually override auto-determined result
 - **Saved fields:** codeLetter, calculatedSampleSize, acceptNumber, rejectNumber, effectiveCodeLetter, isAutoResult, resultOverridden
@@ -190,10 +194,10 @@ Implements ANSI/ASQ Z1.4-2008 standard for acceptance sampling:
 **Verification Examples:**
 | Lot Size | AQL | Code | Sample | Accept | Reject |
 |----------|-----|------|--------|--------|--------|
+| 2 | 2.5 | A | 2 | 1 | 2 |
 | 100 | 2.5 | F | 20 | 1 | 2 |
-| 200 | 2.5 | G | 32 | 1 | 2 |
-| 500 | 1.5 | H | 50 | 1 | 2 |
-| 5000 | 4.0 | L | 200 | 10 | 11 |
+| 200 | 2.5 | G | 32 | 2 | 3 |
+| 500 | 2.5 | H | 50 | 3 | 4 |
 
 ### Inspection List Features
 - **Image thumbnails** displayed in grid (not text links)
