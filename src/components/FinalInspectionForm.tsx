@@ -2814,16 +2814,15 @@ export function FinalInspectionForm() {
               className={inputClass}
             />
           </div>
-          <DropdownWithAdd
-            label="AQL"
-            value={formData.aql}
-            onChange={(value) => setFormData({ ...formData, aql: value })}
-            options={AQL_LEVELS}
-            customOptions={customAqlLevels}
-            onAddCustom={addCustomAqlLevel}
-            required
-            placeholder="Select AQL..."
-          />
+          <div>
+            <label className={labelClass}>AQL *</label>
+            <input
+              type="text"
+              value="2.5"
+              readOnly
+              className={`${inputClass} bg-emerald-50 border-emerald-300 font-semibold cursor-default`}
+            />
+          </div>
         </div>
 
         {/* AQL Z1.4-2008 Calculation Panel */}

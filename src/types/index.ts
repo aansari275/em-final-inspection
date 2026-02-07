@@ -302,12 +302,7 @@ export const MERCHANTS = [
 // BUYER_DESIGNS removed - now stored in localStorage with ability to add new ones
 
 export const AQL_LEVELS = [
-  '0.65',
-  '1.0',
-  '1.5',
-  '2.5',
-  '4.0',
-  '6.5'
+  '2.5'
 ] as const;
 
 export const MATERIAL_TYPES = [
