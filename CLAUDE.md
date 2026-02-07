@@ -88,9 +88,10 @@ Main entry point for the form:
 ### 7. Product Quality Checks
 - Approved Sample Available (Yes/No)
 - Material/Fibre Content (dropdown)
-- OK/NOT OK/NA checks with photo capture on NOT OK:
-  - Motif/Design Check, Backing (with notes), Binding & Edges
-  - Hand Feel, Embossing/Carving, Workmanship, Product Quality Weight
+- **List-view layout** with pill-style OK/NOT OK/NA buttons + camera icon on every row
+- All quality checks (including Labeling, Packaging, Additional) rendered as list rows
+- Photo upload available on ALL checks (not just NOT OK)
+- Checks: Motif/Design, Backing (with notes), Binding & Edges, Hand Feel, Embossing/Carving, Workmanship, Product Quality Weight
 - Text fields: Tuft Density, Pile Height, Product Weight, Size Tolerance, Finishing %, Packed %
 
 ### 8. Labeling & Marking
@@ -154,6 +155,8 @@ All OK/NOT OK checks:
 - **4-column photo grid** with all images cropped to consistent 4:3 landscape frames
 - All photos uniform size regardless of original orientation (no portrait/landscape mix)
 - Photo labels show actual field values (e.g., "Net Weight: 3.5 kgs", "Pile Height: 12mm")
+- **Continuous flow** — no blank page gaps between data sections and photos
+- Photos start on same page if room available, new pages only when needed
 - Color-coded OK/NOT OK/NA status
 - AQL Z1.4-2008 calculation details included
 
