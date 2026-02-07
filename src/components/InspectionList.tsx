@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { collection, query, orderBy, getDocs, deleteDoc, doc } from 'firebase/firestore';
 import { db, getBuyerMerchantEmails, uploadPdfToStorage } from '../lib/firebase';
-import { FinalInspection, COMPANY_NAMES, Company } from '../types';
+import { FinalInspection, COMPANY_NAMES, Company, Defect } from '../types';
 import { generateFinalInspectionPDF } from '../lib/pdfGenerator';
 import { emailSettingsService } from '../lib/emailSettingsService';
 import { Trash2, Eye, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle, Download, Mail, FileText } from 'lucide-react';
@@ -109,73 +109,364 @@ export function InspectionList() {
       const resultBg = inspection.inspectionResult === 'PASS' ? '#dcfce7' : '#fee2e2';
       const companyFullName = COMPANY_NAMES[inspection.company as Company] || 'Eastern Mills';
 
-      // Email with download link instead of attachment
+      // Helper for OK/NOT OK/NA status styling in email
+      const statusStyle = (val: string) => {
+        if (val === 'OK') return 'color: #16a34a; font-weight: bold;';
+        if (val === 'NOT OK') return 'color: #dc2626; font-weight: bold;';
+        return 'color: #9ca3af;';
+      };
+      const statusLabel = (val: string) => val || 'NA';
+
+      // Table styling
+      const tblBorder = 'border: 1px solid #d1d5db;';
+      const cellPad = 'padding: 8px 12px;';
+      const hdrCell = `${tblBorder} ${cellPad} background-color: #059669; color: white; font-weight: bold; font-size: 13px;`;
+      const lblCell = `${tblBorder} ${cellPad} color: #374151; font-size: 13px; background-color: #f9fafb;`;
+      const valCell = `${tblBorder} ${cellPad} color: #111827; font-size: 13px;`;
+      const secHdr = (t: string) => `<table style="width:100%;border-collapse:collapse;margin-top:20px;"><tr><td style="${hdrCell} text-align:center;font-size:14px;letter-spacing:0.5px;">${t}</td></tr></table>`;
+
+      // Quality checks
+      const qualityChecks = [
+        { label: 'Approved Sample Available', value: inspection.approvedSampleAvailable || '-' },
+        { label: 'Material/Fibre Content', value: inspection.materialFibreContent || '-' },
+        { label: 'Motif/Design Check', value: inspection.motifDesignCheck, s: true },
+        { label: 'Backing', value: inspection.backing, s: true, note: inspection.backingNotes },
+        { label: 'Binding & Edges', value: inspection.bindingAndEdges, s: true },
+        { label: 'Hand Feel', value: inspection.handFeel, s: true },
+        { label: 'Embossing/Carving', value: inspection.embossingCarving, s: true },
+        { label: 'Workmanship', value: inspection.workmanship, s: true },
+        { label: 'Product Quality Weight', value: inspection.productQualityWeight, s: true },
+      ];
+
+      const measurements = [
+        { label: 'Tuft Density', value: inspection.tuftDensity },
+        { label: 'Pile Height', value: inspection.pileHeight },
+        { label: 'Product Weight', value: inspection.productWeight },
+        { label: 'Size Tolerance', value: inspection.sizeTolerance },
+        { label: 'Finishing %', value: inspection.finishingPercent },
+        { label: 'Packed %', value: inspection.packedPercent },
+      ].filter(r => r.value);
+
+      const labelChecks = [
+        { label: 'Label Placement', value: inspection.labelPlacement },
+        { label: 'Side Marking', value: inspection.sideMarking },
+        { label: 'Outer Marking', value: inspection.outerMarking },
+        { label: 'Inner Pack', value: inspection.innerPack },
+        { label: 'Care Labels', value: inspection.careLabels },
+        { label: 'SKU Stickers', value: inspection.skuStickers },
+        { label: 'UPC Barcodes', value: inspection.upcBarcodes },
+        { label: 'Product Label', value: inspection.productLabel },
+        { label: 'Carton Label', value: inspection.cartonLabel },
+        { label: 'Barcode Scan', value: inspection.barcodeScan },
+      ];
+
+      const pkgRows = [
+        { label: 'Carton Ply', value: inspection.cartonPly },
+        { label: 'Carton Drop Test', value: inspection.cartonDropTest, s: true },
+        { label: 'Packing Type', value: inspection.packingType },
+        { label: 'Gross Weight', value: inspection.grossWeight },
+        { label: 'Net Weight', value: inspection.netWeight },
+        { label: 'Carton/Bale Numbering', value: inspection.cartonBaleNumbering, s: true },
+        { label: 'Carton Dimension', value: inspection.cartonDimension, s: true },
+        { label: 'Pcs per Carton/Bale', value: inspection.pcsPerCartonBale },
+        { label: 'Pcs per Polybag', value: inspection.pcsPerPolybag },
+        { label: 'Carton (L x W x H)', value: [inspection.cartonMeasurementL, inspection.cartonMeasurementW, inspection.cartonMeasurementH].filter(Boolean).join(' x ') || '' },
+      ];
+
+      const hasDefects = inspection.defects && inspection.defects.length > 0 && inspection.defects.some((d: Defect) => d.defectCode);
+
+      // Collect photos
+      const allPhotos = [
+        { url: inspection.approvedSamplePhoto, label: 'Approved Sample' },
+        { url: inspection.redSealFrontPhoto, label: 'Red Seal - Front' },
+        { url: inspection.redSealBackPhoto, label: 'Red Seal - Back' },
+        { url: inspection.redSealCloseUpPhoto, label: 'Close-up with Red Seal' },
+        { url: inspection.redSealProductFront, label: 'Front with Red Seal' },
+        { url: inspection.redSealProductBack, label: 'Back with Red Seal' },
+        { url: inspection.labelPhoto, label: 'Label' },
+        { url: inspection.moisturePhoto, label: 'Moisture Meter' },
+        { url: inspection.sizeFrontPhoto, label: 'Size Front' },
+        { url: inspection.sizeSidePhoto, label: 'Size Side' },
+        { url: inspection.inspectedSamplesPhoto, label: 'Inspected Samples' },
+        { url: inspection.metalCheckingPhoto, label: 'Metal Checking' },
+        ...(inspection.stackedGoodsPhoto ? [{ url: inspection.stackedGoodsPhoto, label: 'Stacked Goods' }] : []),
+        ...(inspection.consumerPieces || []).map((p: { label: string; url: string }) => ({ url: p.url, label: p.label })),
+        ...(inspection.unitLoadPhotos || []).map((p: { label: string; url: string }) => ({ url: p.url, label: p.label })),
+        ...(inspection.constructionPhotos?.warpPer10cm ? [{ url: inspection.constructionPhotos.warpPer10cm, label: 'Warp per 10 cms' }] : []),
+        ...(inspection.constructionPhotos?.weftPer10cm ? [{ url: inspection.constructionPhotos.weftPer10cm, label: 'Weft per 10 cms' }] : []),
+        ...(inspection.constructionPhotos?.pileHeightPhoto ? [{ url: inspection.constructionPhotos.pileHeightPhoto, label: 'Pile Height' }] : []),
+        ...(inspection.constructionPhotos?.productNetWeightPhoto ? [{ url: inspection.constructionPhotos.productNetWeightPhoto, label: 'Product Net Weight' }] : []),
+        ...(inspection.constructionPhotos?.productGrossWeightPhoto ? [{ url: inspection.constructionPhotos.productGrossWeightPhoto, label: 'Product Gross Weight' }] : []),
+        ...(inspection.otherPhotos || []).map((url: string, i: number) => ({ url, label: `Other ${i + 1}` })),
+      ].filter(p => p.url);
+
+      // Email with rich content + download link
       const emailHtml = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 20px; text-align: center;">
-            <h1 style="color: white; margin: 0;">${companyFullName}</h1>
-            <p style="color: rgba(255,255,255,0.9); margin: 5px 0 0 0;">Final Inspection Report</p>
-          </div>
+        <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; background: #ffffff;">
+          <!-- Header -->
+          <table style="width: 100%; border-collapse: collapse; background: #059669;">
+            <tr>
+              <td style="padding: 24px; text-align: center; color: white;">
+                <h1 style="margin: 0; font-size: 22px; letter-spacing: 1px;">${companyFullName}</h1>
+                <p style="margin: 6px 0 0; font-size: 14px; opacity: 0.9;">Final Inspection Report</p>
+              </td>
+            </tr>
+          </table>
 
-          <div style="padding: 20px; background: #f9fafb;">
-            <div style="background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-              <h2 style="margin: 0 0 15px 0; color: #111827; font-size: 18px;">
-                Result: <span style="color: ${resultColor}; font-weight: bold;">${inspection.inspectionResult}</span>
-              </h2>
+          <!-- PASS/FAIL Banner -->
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="background: ${resultBg}; padding: 18px; text-align: center; border-bottom: 4px solid ${resultColor};">
+                <span style="color: ${resultColor}; font-size: 28px; font-weight: bold; letter-spacing: 2px;">
+                  ${inspection.inspectionResult === 'PASS' ? '&#10003; PASSED' : '&#10007; FAILED'}
+                </span>
+                ${inspection.resultOverridden ? '<br><span style="color: #d97706; font-size: 12px; font-style: italic;">Inspector Override Applied</span>' : ''}
+              </td>
+            </tr>
+          </table>
 
-              <table style="width: 100%; border-collapse: collapse;">
-                <tr>
-                  <td style="padding: 8px 0; color: #6b7280; width: 40%;">Buyer Code:</td>
-                  <td style="padding: 8px 0; color: #111827; font-weight: 500;">${inspection.customerCode}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; color: #6b7280;">Design:</td>
-                  <td style="padding: 8px 0; color: #111827; font-weight: 500;">${inspection.buyerDesignName || inspection.emplDesignNo}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; color: #6b7280;">OPS No:</td>
-                  <td style="padding: 8px 0; color: #111827; font-weight: 500;">${inspection.opsNo}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; color: #6b7280;">Inspection Date:</td>
-                  <td style="padding: 8px 0; color: #111827; font-weight: 500;">${inspection.inspectionDate}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; color: #6b7280;">Inspector:</td>
-                  <td style="padding: 8px 0; color: #111827; font-weight: 500;">${inspection.qcInspectorName}</td>
-                </tr>
-              </table>
-            </div>
+          <div style="padding: 20px;">
+            <!-- Order Information -->
+            ${secHdr('ORDER INFORMATION')}
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="${lblCell} width: 35%;">Inspection Date</td>
+                <td style="${valCell}">${inspection.inspectionDate}</td>
+                <td style="${lblCell} width: 15%;">Doc No.</td>
+                <td style="${valCell}">${inspection.documentNo}</td>
+              </tr>
+              <tr>
+                <td style="${lblCell}">QC Inspector</td>
+                <td style="${valCell}">${inspection.qcInspectorName}</td>
+                <td style="${lblCell}">Merchant</td>
+                <td style="${valCell}">${inspection.merchant}</td>
+              </tr>
+              <tr>
+                <td style="${lblCell}">Customer</td>
+                <td style="${valCell}" colspan="3"><strong>${inspection.customerName}</strong> (${inspection.customerCode})</td>
+              </tr>
+              <tr>
+                <td style="${lblCell}">Customer PO</td>
+                <td style="${valCell}">${inspection.customerPoNo}</td>
+                <td style="${lblCell}">OPS No.</td>
+                <td style="${valCell}"><strong>${inspection.opsNo}</strong></td>
+              </tr>
+              <tr>
+                <td style="${lblCell}">Buyer Design</td>
+                <td style="${valCell}">${inspection.buyerDesignName}</td>
+                <td style="${lblCell}">EMPL Design</td>
+                <td style="${valCell}">${inspection.emplDesignNo}</td>
+              </tr>
+              <tr>
+                <td style="${lblCell}">Color</td>
+                <td style="${valCell}">${inspection.colorName}</td>
+                <td style="${lblCell}">Sizes</td>
+                <td style="${valCell}">${inspection.productSizes}</td>
+              </tr>
+            </table>
 
-            <div style="background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-              <h3 style="margin: 0 0 15px 0; color: #111827; font-size: 16px;">Quantities</h3>
-              <table style="width: 100%; border-collapse: collapse;">
-                <tr>
-                  <td style="padding: 8px 0; color: #6b7280;">Accepted:</td>
-                  <td style="padding: 8px 0; color: #22c55e; font-weight: bold;">${inspection.acceptedQty}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; color: #6b7280;">Rejected:</td>
-                  <td style="padding: 8px 0; color: #ef4444; font-weight: bold;">${inspection.rejectedQty}</td>
-                </tr>
-              </table>
-            </div>
+            <!-- Inspected Articles -->
+            ${inspection.inspectedArticles && inspection.inspectedArticles.length > 0 ? `
+            ${secHdr('INSPECTED ARTICLES')}
+            <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+              <tr>
+                <td style="${hdrCell}">Article</td>
+                <td style="${hdrCell}">Size</td>
+                <td style="${hdrCell}">Color</td>
+                <td style="${hdrCell} text-align: right;">Total Pcs</td>
+                <td style="${hdrCell} text-align: right;">Inspected</td>
+              </tr>
+              ${inspection.inspectedArticles.map((a: { articleName?: string; size?: string; color?: string; pcs?: number; inspectedQty?: number }) => `
+              <tr>
+                <td style="${valCell}">${a.articleName || '-'}</td>
+                <td style="${valCell}">${a.size || '-'}</td>
+                <td style="${valCell}">${a.color || '-'}</td>
+                <td style="${valCell} text-align: right;">${a.pcs || 0}</td>
+                <td style="${valCell} text-align: right; font-weight: bold; color: #059669;">${a.inspectedQty || a.pcs || 0}</td>
+              </tr>
+              `).join('')}
+              <tr style="font-weight: bold;">
+                <td colspan="3" style="${lblCell}">Total</td>
+                <td style="${lblCell} text-align: right;">${inspection.inspectedArticles.reduce((s: number, a: { pcs?: number }) => s + (a.pcs || 0), 0)}</td>
+                <td style="${lblCell} text-align: right; color: #059669;">${inspection.inspectedArticles.reduce((s: number, a: { inspectedQty?: number; pcs?: number }) => s + (a.inspectedQty || a.pcs || 0), 0)}</td>
+              </tr>
+            </table>
+            ` : ''}
+
+            <!-- AQL & Quantities -->
+            ${secHdr('AQL SAMPLING & QUANTITIES')}
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="${lblCell} width: 35%;">Total Order Qty</td>
+                <td style="${valCell}">${inspection.totalOrderQty}</td>
+                <td style="${lblCell} width: 15%;">Inspected Lot</td>
+                <td style="${valCell}">${inspection.inspectedLotQty}</td>
+              </tr>
+              <tr>
+                <td style="${lblCell}">AQL Level</td>
+                <td style="${valCell}">${inspection.aql}</td>
+                <td style="${lblCell}">Sample Size</td>
+                <td style="${valCell}"><strong>${inspection.sampleSize}</strong></td>
+              </tr>
+              ${inspection.codeLetter ? `
+              <tr>
+                <td style="${lblCell}">Code Letter</td>
+                <td style="${valCell}"><strong>${inspection.codeLetter}</strong>${inspection.effectiveCodeLetter && inspection.effectiveCodeLetter !== inspection.codeLetter ? ` &#8594; ${inspection.effectiveCodeLetter}` : ''}</td>
+                <td style="${lblCell}">Standard</td>
+                <td style="${valCell}">Z1.4-2008 Level II</td>
+              </tr>
+              ` : ''}
+              <tr>
+                <td style="${lblCell}">Accept &#8804;</td>
+                <td style="${valCell}"><span style="color: #16a34a; font-weight: bold; font-size: 16px;">${inspection.acceptNumber ?? inspection.acceptedQty}</span></td>
+                <td style="${lblCell}">Reject &#8805;</td>
+                <td style="${valCell}"><span style="color: #dc2626; font-weight: bold; font-size: 16px;">${inspection.rejectNumber ?? '-'}</span></td>
+              </tr>
+              <tr>
+                <td style="${lblCell}">Accepted Qty</td>
+                <td style="${valCell} color: #16a34a; font-weight: bold;">${inspection.acceptedQty}</td>
+                <td style="${lblCell}">Rejected Qty</td>
+                <td style="${valCell} color: #dc2626; font-weight: bold;">${inspection.rejectedQty}</td>
+              </tr>
+            </table>
+
+            <!-- Product Quality Checks -->
+            ${secHdr('PRODUCT QUALITY CHECKS')}
+            <table style="width: 100%; border-collapse: collapse;">
+              ${qualityChecks.map(qc => `
+              <tr>
+                <td style="${lblCell} width: 50%;">${qc.label}</td>
+                <td style="${valCell}${qc.s ? ' ' + statusStyle(qc.value as string) : ''}">${qc.s ? statusLabel(qc.value as string) : (qc.value || '-')}${qc.note ? ` <span style="color: #6b7280; font-weight: normal; font-size: 12px;">(${qc.note})</span>` : ''}</td>
+              </tr>
+              `).join('')}
+            </table>
+
+            <!-- Measurement Details -->
+            ${measurements.length > 0 ? `
+            ${secHdr('MEASUREMENT DETAILS')}
+            <table style="width: 100%; border-collapse: collapse;">
+              ${measurements.map((m, i) => {
+                if (i % 2 === 0) {
+                  const next = measurements[i + 1];
+                  return `<tr>
+                    <td style="${lblCell} width: 25%;">${m.label}</td>
+                    <td style="${valCell} width: 25%;"><strong>${m.value}</strong></td>
+                    ${next ? `<td style="${lblCell} width: 25%;">${next.label}</td><td style="${valCell} width: 25%;"><strong>${next.value}</strong></td>` : `<td style="${lblCell} width: 25%;"></td><td style="${valCell} width: 25%;"></td>`}
+                  </tr>`;
+                }
+                return '';
+              }).join('')}
+            </table>
+            ` : ''}
+
+            <!-- Labeling & Marking -->
+            ${secHdr('LABELING & MARKING')}
+            <table style="width: 100%; border-collapse: collapse;">
+              ${labelChecks.map((lc, i) => {
+                if (i % 2 === 0) {
+                  const next = labelChecks[i + 1];
+                  return `<tr>
+                    <td style="${lblCell} width: 25%;">${lc.label}</td>
+                    <td style="${valCell} width: 25%; ${statusStyle(lc.value as string)}">${statusLabel(lc.value as string)}</td>
+                    ${next ? `<td style="${lblCell} width: 25%;">${next.label}</td><td style="${valCell} width: 25%; ${statusStyle(next.value as string)}">${statusLabel(next.value as string)}</td>` : `<td style="${lblCell} width: 25%;"></td><td style="${valCell} width: 25%;"></td>`}
+                  </tr>`;
+                }
+                return '';
+              }).join('')}
+            </table>
+
+            <!-- Packaging -->
+            ${secHdr('PACKAGING')}
+            <table style="width: 100%; border-collapse: collapse;">
+              ${pkgRows.filter(r => r.value).map((pr, i, arr) => {
+                if (i % 2 === 0) {
+                  const next = arr[i + 1];
+                  return `<tr>
+                    <td style="${lblCell} width: 25%;">${pr.label}</td>
+                    <td style="${valCell} width: 25%;${pr.s ? ' ' + statusStyle(pr.value as string) : ''}">${pr.s ? statusLabel(pr.value as string) : pr.value}</td>
+                    ${next ? `<td style="${lblCell} width: 25%;">${next.label}</td><td style="${valCell} width: 25%;${next.s ? ' ' + statusStyle(next.value as string) : ''}">${next.s ? statusLabel(next.value as string) : next.value}</td>` : `<td style="${lblCell} width: 25%;"></td><td style="${valCell} width: 25%;"></td>`}
+                  </tr>`;
+                }
+                return '';
+              }).join('')}
+            </table>
+
+            <!-- Defects -->
+            ${hasDefects ? `
+            ${secHdr('DEFECT TRACKING')}
+            <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+              <tr>
+                <td style="${hdrCell}">Code</td>
+                <td style="${hdrCell}">Description</td>
+                <td style="${hdrCell} text-align: center;">Major</td>
+                <td style="${hdrCell} text-align: center;">Minor</td>
+              </tr>
+              ${inspection.defects.filter((d: Defect) => d.defectCode).map((d: Defect) => `
+              <tr>
+                <td style="${valCell} font-weight: bold;">${d.defectCode}</td>
+                <td style="${valCell}">${d.description || '-'}</td>
+                <td style="${valCell} text-align: center;${d.majorCount > 0 ? ' color: #dc2626; font-weight: bold;' : ''}">${d.majorCount || 0}</td>
+                <td style="${valCell} text-align: center;${d.minorCount > 0 ? ' color: #d97706; font-weight: bold;' : ''}">${d.minorCount || 0}</td>
+              </tr>
+              `).join('')}
+              <tr style="font-weight: bold;">
+                <td colspan="2" style="${lblCell}">Total Defects</td>
+                <td style="${lblCell} text-align: center; color: #dc2626;">${inspection.defects.reduce((s: number, d: Defect) => s + (d.majorCount || 0), 0)}</td>
+                <td style="${lblCell} text-align: center; color: #d97706;">${inspection.defects.reduce((s: number, d: Defect) => s + (d.minorCount || 0), 0)}</td>
+              </tr>
+            </table>
+            ` : ''}
+
+            <!-- QC Remarks -->
+            ${inspection.qcInspectorRemarks ? `
+            ${secHdr('QC INSPECTOR REMARKS')}
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr><td style="${valCell} font-style: italic; line-height: 1.6;">${inspection.qcInspectorRemarks}</td></tr>
+            </table>
+            ` : ''}
+
+            <!-- Photos -->
+            ${allPhotos.length > 0 ? `
+            ${secHdr('PHOTO DOCUMENTATION')}
+            <table style="width: 100%; border-collapse: collapse;">
+              ${allPhotos.map((photo, i) => {
+                if (i % 2 === 0) {
+                  const next = allPhotos[i + 1];
+                  return `<tr>
+                    <td style="${tblBorder} padding: 8px; text-align: center; width: 50%; vertical-align: top;">
+                      <p style="color: #374151; font-size: 12px; font-weight: bold; margin: 0 0 6px;">${photo.label}</p>
+                      <img src="${photo.url}" style="max-width: 100%; max-height: 250px; border-radius: 4px;" alt="${photo.label}">
+                    </td>
+                    ${next ? `
+                    <td style="${tblBorder} padding: 8px; text-align: center; width: 50%; vertical-align: top;">
+                      <p style="color: #374151; font-size: 12px; font-weight: bold; margin: 0 0 6px;">${next.label}</p>
+                      <img src="${next.url}" style="max-width: 100%; max-height: 250px; border-radius: 4px;" alt="${next.label}">
+                    </td>` : `<td style="${tblBorder} padding: 8px;"></td>`}
+                  </tr>`;
+                }
+                return '';
+              }).join('')}
+            </table>
+            ` : ''}
 
             <!-- Download Button -->
-            <div style="text-align: center; padding: 20px;">
+            <div style="text-align: center; padding: 24px 0;">
               <a href="${pdfUrl}"
-                 style="display: inline-block; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
-                📄 Download Full Report (PDF)
+                 style="display: inline-block; background: #059669; color: white; padding: 14px 32px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px;">
+                Download Full Report (PDF)
               </a>
-              <p style="margin-top: 12px; color: #6b7280; font-size: 12px;">
-                Click the button above to download the complete inspection report with all photos
-              </p>
             </div>
           </div>
 
-          <div style="padding: 15px; text-align: center; color: #6b7280; font-size: 12px;">
-            <p>This is an automated email from ${companyFullName}</p>
-          </div>
+          <!-- Footer -->
+          <table style="width: 100%; border-collapse: collapse; background: #059669;">
+            <tr>
+              <td style="padding: 16px; text-align: center; color: white; font-size: 12px;">
+                <p style="margin: 0;">${companyFullName} - Final Inspection Report</p>
+                <p style="margin: 4px 0 0; opacity: 0.8;">PDF report attached for complete documentation</p>
+              </td>
+            </tr>
+          </table>
         </div>
       `;
 
