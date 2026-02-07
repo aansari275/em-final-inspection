@@ -95,7 +95,7 @@ export const AQL_ACCEPT_REJECT_TABLE: Record<string, Record<string, AcceptReject
     '0.65': 'down',
     '1.0': 'down',
     '1.5': 'down',
-    '2.5': 'down',
+    '2.5': { accept: 0, reject: 1 },
     '4.0': { accept: 1, reject: 2 },
     '6.5': { accept: 2, reject: 3 },
   },

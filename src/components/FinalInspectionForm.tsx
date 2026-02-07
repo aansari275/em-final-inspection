@@ -314,25 +314,23 @@ interface NotOkPhotoProps {
 }
 
 function NotOkPhotoUpload({ fieldLabel, isNotOk, preview, onPhotoChange }: NotOkPhotoProps) {
-  if (!isNotOk) return null;
-
+  // Always show photo upload (not just when NOT OK)
   return (
-    <div className="mt-2">
+    <div className="flex items-center">
       {preview ? (
         <div className="relative inline-block">
-          <img src={preview} alt={`${fieldLabel} NOT OK`} className="w-20 h-20 object-cover rounded-lg border-2 border-red-300" />
+          <img src={preview} alt={`${fieldLabel}`} className="w-10 h-10 object-cover rounded border border-gray-300" />
           <button
             type="button"
             onClick={() => onPhotoChange(null)}
             className="absolute -top-1 -right-1 p-0.5 bg-red-500 text-white rounded-full"
           >
-            <X size={12} />
+            <X size={10} />
           </button>
         </div>
       ) : (
-        <label className="inline-flex items-center gap-2 px-3 py-1.5 text-sm border border-red-300 text-red-600 rounded-lg cursor-pointer hover:bg-red-50">
+        <label className={`inline-flex items-center justify-center w-9 h-9 rounded-lg cursor-pointer border ${isNotOk ? 'border-red-300 text-red-500 hover:bg-red-50' : 'border-gray-200 text-gray-400 hover:bg-gray-50 hover:text-gray-600'}`}>
           <Camera size={16} />
-          <span>Take/Upload Photo</span>
           <input
             type="file"
             accept="image/*"
@@ -3046,15 +3044,17 @@ export function FinalInspectionForm() {
       {/* Quality Checks */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Quality Checks</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="divide-y divide-gray-100">
           {OK_NOT_OK_FIELDS.map(({ key, label }) => {
             const fieldKey = key as keyof FormDataState;
             const fieldValue = formData[fieldKey] as OkNotOk;
             return (
-              <div key={key} className="border border-gray-200 rounded-lg p-3">
-                <label className={labelClass}>{label}</label>
-                <div className="flex gap-3">
-                  <label className="flex items-center gap-2">
+              <div key={key} className="flex items-center gap-2 py-2.5">
+                {/* Label */}
+                <span className="text-sm font-medium text-gray-700 min-w-0 flex-1 truncate">{label}</span>
+                {/* Radio buttons */}
+                <div className="flex items-center gap-1 shrink-0">
+                  <label className={`flex items-center justify-center px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer border transition-colors ${fieldValue === 'OK' ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-gray-200 text-gray-400 hover:border-emerald-200 hover:text-emerald-600'}`}>
                     <input
                       type="radio"
                       name={key}
@@ -3062,25 +3062,24 @@ export function FinalInspectionForm() {
                       checked={fieldValue === 'OK'}
                       onChange={() => {
                         setFormData({ ...formData, [fieldKey]: 'OK' as OkNotOk });
-                        // Clear photo when changing to OK
                         handleNotOkPhotoChange(key, null);
                       }}
-                      className="text-emerald-600"
+                      className="sr-only"
                     />
-                    <span className="text-sm text-green-600 font-medium">OK</span>
+                    OK
                   </label>
-                  <label className="flex items-center gap-2">
+                  <label className={`flex items-center justify-center px-2 py-1 rounded-md text-xs font-semibold cursor-pointer border transition-colors ${fieldValue === 'NOT OK' ? 'bg-red-50 border-red-300 text-red-700' : 'border-gray-200 text-gray-400 hover:border-red-200 hover:text-red-600'}`}>
                     <input
                       type="radio"
                       name={key}
                       value="NOT OK"
                       checked={fieldValue === 'NOT OK'}
                       onChange={() => setFormData({ ...formData, [fieldKey]: 'NOT OK' as OkNotOk })}
-                      className="text-red-600"
+                      className="sr-only"
                     />
-                    <span className="text-sm text-red-600 font-medium">NOT OK</span>
+                    NOT OK
                   </label>
-                  <label className="flex items-center gap-2">
+                  <label className={`flex items-center justify-center px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer border transition-colors ${fieldValue === 'NA' ? 'bg-gray-100 border-gray-300 text-gray-600' : 'border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-500'}`}>
                     <input
                       type="radio"
                       name={key}
@@ -3088,14 +3087,14 @@ export function FinalInspectionForm() {
                       checked={fieldValue === 'NA'}
                       onChange={() => {
                         setFormData({ ...formData, [fieldKey]: 'NA' as OkNotOk });
-                        // Clear photo when changing to NA
                         handleNotOkPhotoChange(key, null);
                       }}
-                      className="text-gray-400"
+                      className="sr-only"
                     />
-                    <span className="text-sm text-gray-500 font-medium">NA</span>
+                    NA
                   </label>
                 </div>
+                {/* Photo button */}
                 <NotOkPhotoUpload
                   fieldKey={key}
                   fieldLabel={label}

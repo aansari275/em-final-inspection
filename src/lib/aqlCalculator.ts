@@ -149,7 +149,7 @@ export function getAcceptReject(
 
   return {
     codeLetter,
-    sampleSize: SAMPLE_SIZES[currentCodeLetter],
+    sampleSize: SAMPLE_SIZES[codeLetter], // Use ORIGINAL code letter's sample size, NOT effective
     acceptNumber: value.accept,
     rejectNumber: value.reject,
     effectiveCodeLetter: currentCodeLetter,

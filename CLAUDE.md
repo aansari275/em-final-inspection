@@ -191,13 +191,21 @@ Implements ANSI/ASQ Z1.4-2008 standard for acceptance sampling:
 - **Inspector override:** Can manually override auto-determined result
 - **Saved fields:** codeLetter, calculatedSampleSize, acceptNumber, rejectNumber, effectiveCodeLetter, isAutoResult, resultOverridden
 
-**Verification Examples:**
-| Lot Size | AQL | Code | Sample | Accept | Reject |
-|----------|-----|------|--------|--------|--------|
-| 2 | 2.5 | A | 2 | 1 | 2 |
-| 100 | 2.5 | F | 20 | 1 | 2 |
-| 200 | 2.5 | G | 32 | 2 | 3 |
-| 500 | 2.5 | H | 50 | 3 | 4 |
+**Verification Examples (AQL 2.5, Level II):**
+| Lot Size | Code | Arrow → | Eff. Code | Sample | Accept | Reject |
+|----------|------|---------|-----------|--------|--------|--------|
+| 2 | A | A→E | E | 2 | 0 | 1 |
+| 8 | A | A→E | E | 2 | 0 | 1 |
+| 10 | B | B→E | E | 3 | 0 | 1 |
+| 50 | D | D→E | E | 8 | 0 | 1 |
+| 100 | F | - | F | 20 | 1 | 2 |
+| 200 | G | - | G | 32 | 2 | 3 |
+| 500 | H | - | H | 50 | 3 | 4 |
+
+**CRITICAL AQL RULES - DO NOT CHANGE:**
+1. **E at AQL 2.5 = Accept 0, Reject 1** (NOT arrow down)
+2. **Sample size comes from ORIGINAL code letter**, NOT the effective code letter after arrows
+3. Arrows only change Accept/Reject thresholds, NOT sample size
 
 ### Inspection List Features
 - **Image thumbnails** displayed in grid (not text links)
