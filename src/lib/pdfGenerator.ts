@@ -138,6 +138,51 @@ async function fetchImageAsFallback(url: string): Promise<string | null> {
   }
 }
 
+// Crop image to consistent landscape aspect ratio (4:3) for uniform PDF grid
+const PHOTO_ASPECT_RATIO = 4 / 3; // width / height
+async function cropToLandscape(base64: string): Promise<{ data: string; width: number; height: number }> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const srcW = img.naturalWidth || img.width;
+        const srcH = img.naturalHeight || img.height;
+
+        // Calculate crop region to fill target ratio (center crop)
+        let cropW = srcW;
+        let cropH = srcW / PHOTO_ASPECT_RATIO;
+
+        if (cropH > srcH) {
+          cropH = srcH;
+          cropW = srcH * PHOTO_ASPECT_RATIO;
+        }
+
+        const sx = (srcW - cropW) / 2;
+        const sy = (srcH - cropH) / 2;
+
+        // Output size capped for PDF quality
+        const outW = Math.min(cropW, 800);
+        const outH = Math.round(outW / PHOTO_ASPECT_RATIO);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = outW;
+        canvas.height = outH;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, sx, sy, cropW, cropH, 0, 0, outW, outH);
+          resolve({ data: canvas.toDataURL('image/jpeg', 0.82), width: outW, height: outH });
+        } else {
+          resolve({ data: base64, width: srcW, height: srcH });
+        }
+      } catch {
+        resolve({ data: base64, width: img.width, height: img.height });
+      }
+    };
+    img.onerror = () => resolve({ data: base64, width: 400, height: 300 });
+    img.src = base64;
+  });
+}
+
 export async function generateFinalInspectionPDF(inspection: FinalInspection): Promise<string> {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -772,27 +817,20 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
   const allPhotos: PhotoItem[] = photoGroups.flatMap(g => g.photos);
 
   // Load all images in parallel (batch of 6 at a time to avoid overwhelming browser)
+  // All images are cropped to consistent 4:3 landscape aspect ratio
   const BATCH_SIZE = 6;
   for (let i = 0; i < allPhotos.length; i += BATCH_SIZE) {
     const batch = allPhotos.slice(i, i + BATCH_SIZE);
     await Promise.all(batch.map(async (photo) => {
       const base64 = await urlToBase64(photo.url);
-      photo.base64 = base64;
       if (base64) {
-        try {
-          const img = new Image();
-          await new Promise<void>((resolve) => {
-            img.onload = () => {
-              photo.width = img.naturalWidth || img.width;
-              photo.height = img.naturalHeight || img.height;
-              resolve();
-            };
-            img.onerror = () => resolve();
-            img.src = base64;
-          });
-        } catch {
-          // Dimensions not available
-        }
+        // Crop to consistent landscape ratio
+        const cropped = await cropToLandscape(base64);
+        photo.base64 = cropped.data;
+        photo.width = cropped.width;
+        photo.height = cropped.height;
+      } else {
+        photo.base64 = null;
       }
     }));
   }
@@ -847,29 +885,16 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
     const imgAreaW = cellW;
 
     // Light border around image area
-    doc.setDrawColor(220, 220, 220);
-    doc.setLineWidth(0.2);
-    doc.rect(cellX, imgAreaY, imgAreaW, imgAreaH);
+    doc.setDrawColor(200, 205, 215);
+    doc.setLineWidth(0.3);
+    doc.rect(cellX, imgAreaY, imgAreaW, imgAreaH, 'S');
 
-    // Calculate image dimensions maintaining aspect ratio
-    const origW = photo.width || 400;
-    const origH = photo.height || 300;
-    const ratio = origW / origH;
-    const padInner = 1.5;
-    const maxImgW = imgAreaW - padInner * 2;
-    const maxImgH = imgAreaH - padInner * 2;
-
-    let imgW: number, imgH: number;
-    if (ratio > maxImgW / maxImgH) {
-      imgW = maxImgW;
-      imgH = imgW / ratio;
-    } else {
-      imgH = maxImgH;
-      imgW = imgH * ratio;
-    }
-
-    const imgX = cellX + (imgAreaW - imgW) / 2;
-    const imgY = imgAreaY + (imgAreaH - imgH) / 2;
+    // All images are pre-cropped to 4:3 landscape — fill the frame
+    const pad = 0.5;
+    const imgW = imgAreaW - pad * 2;
+    const imgH = imgAreaH - pad * 2;
+    const imgX = cellX + pad;
+    const imgY = imgAreaY + pad;
 
     try {
       doc.addImage(photo.base64!, 'JPEG', imgX, imgY, imgW, imgH);
