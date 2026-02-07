@@ -849,18 +849,37 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
   // Start photo pages
   let photoPageStarted = false;
 
+  const addPhotoHeader = () => {
+    doc.setFillColor(...primaryColor);
+    doc.rect(0, 0, pageWidth, 14, 'F');
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(255, 255, 255);
+    doc.text('Photo Documentation', pageWidth / 2, 10, { align: 'center' });
+    y = 20;
+  };
+
   const ensurePhotoPage = (neededHeight: number) => {
-    if (!photoPageStarted || y + neededHeight > pageHeight - 15) {
-      doc.addPage();
-      // Slim header bar
-      doc.setFillColor(...primaryColor);
-      doc.rect(0, 0, pageWidth, 14, 'F');
-      doc.setFontSize(9);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(255, 255, 255);
-      doc.text('Photo Documentation', pageWidth / 2, 10, { align: 'center' });
-      y = 20;
+    if (!photoPageStarted) {
+      // First photo section: continue on current page if enough room, else new page
+      if (y + neededHeight > pageHeight - 15) {
+        doc.addPage();
+        addPhotoHeader();
+      } else {
+        // Enough room — add a small section divider and continue
+        y += 4;
+        doc.setFillColor(...headerBg);
+        doc.rect(M, y, TW, 6, 'F');
+        doc.setFontSize(7.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(255, 255, 255);
+        doc.text('PHOTO DOCUMENTATION', M + 3, y + 4);
+        y += 10;
+      }
       photoPageStarted = true;
+    } else if (y + neededHeight > pageHeight - 15) {
+      doc.addPage();
+      addPhotoHeader();
     }
   };
 
