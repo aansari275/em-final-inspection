@@ -20,7 +20,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       includeAssets: ['favicon.svg', 'apple-touch-icon.svg'],
       manifest: {
         name: 'Final Inspection - Eastern Mills',
@@ -59,9 +59,10 @@ export default defineConfig({
       workbox: {
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MB
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        // Skip waiting so new service worker activates immediately
-        skipWaiting: true,
-        clientsClaim: true,
+        // Do NOT auto-activate new SW - let user decide when to update
+        // This prevents the page from refreshing and losing form data
+        skipWaiting: false,
+        clientsClaim: false,
         // Navigation preload for faster page loads
         navigationPreload: true,
         runtimeCaching: [

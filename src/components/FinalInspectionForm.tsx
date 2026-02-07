@@ -336,7 +336,6 @@ function NotOkPhotoUpload({ fieldLabel, isNotOk, preview, onPhotoChange }: NotOk
           <input
             type="file"
             accept="image/*"
-            capture="environment"
             className="hidden"
             onChange={(e) => onPhotoChange(e.target.files?.[0] || null)}
           />
@@ -802,7 +801,7 @@ export function FinalInspectionForm() {
     }
   }, [photoPreviews, constructionPreviews, stackedGoodsPreview, consumerPieces, otherPreviews, debouncedSave]);
 
-  // Backup: Interval-based auto-save every 30 seconds
+  // Backup: Interval-based auto-save every 60 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       if (formData.customerName || formData.opsNo || formData.buyerDesignName) {
@@ -810,10 +809,21 @@ export function FinalInspectionForm() {
           saveDraftRef.current();
         }
       }
-    }, 30000);
+    }, 60000);
 
     return () => clearInterval(interval);
   }, [formData.customerName, formData.opsNo, formData.buyerDesignName]);
+
+  // Keep-alive: Prevent PWA/browser from killing the page due to inactivity
+  // Refreshes a tiny timer every 5 minutes to keep the page active
+  useEffect(() => {
+    const keepAlive = setInterval(() => {
+      // Touch localStorage to signal activity
+      localStorage.setItem('finalInspection_keepAlive', Date.now().toString());
+    }, 5 * 60 * 1000); // every 5 minutes
+
+    return () => clearInterval(keepAlive);
+  }, []);
 
   // Save draft immediately when page loses visibility (phone call, app switch)
   useEffect(() => {
@@ -2515,8 +2525,7 @@ export function FinalInspectionForm() {
               <input
                 type="file"
                 accept="image/*"
-                capture="environment"
-                className="hidden"
+                    className="hidden"
                 onChange={(e) => handleStackedGoodsChange(e.target.files?.[0] || null)}
               />
             </label>
@@ -2588,8 +2597,7 @@ export function FinalInspectionForm() {
                     <input
                       type="file"
                       accept="image/*"
-                      capture="environment"
-                      className="hidden"
+                                className="hidden"
                       onChange={(e) => handleConsumerPiecePhoto(index, e.target.files?.[0] || null)}
                     />
                   </label>
@@ -2694,8 +2702,7 @@ export function FinalInspectionForm() {
                         <input
                           type="file"
                           accept="image/*"
-                          capture="environment"
-                          className="hidden"
+                                        className="hidden"
                           onChange={(e) => handleUnitLoadPhotoChange(index, e.target.files?.[0] || null)}
                         />
                       </label>
@@ -2761,8 +2768,7 @@ export function FinalInspectionForm() {
                   <input
                     type="file"
                     accept="image/*"
-                    capture="environment"
-                    className="hidden"
+                            className="hidden"
                     onChange={(e) => handleConstructionPhotoChange(key as ConstructionPhotoKey, e.target.files?.[0] || null)}
                   />
                 </label>
@@ -2837,7 +2843,7 @@ export function FinalInspectionForm() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-white p-3 rounded-lg shadow-sm">
                   <div className="text-xs text-gray-500 uppercase tracking-wide">Code Letter</div>
-                  <div className="text-xl font-bold text-emerald-700">{aqlCalculation.effectiveCodeLetter}</div>
+                  <div className="text-xl font-bold text-emerald-700">{aqlCalculation.codeLetter}</div>
                 </div>
                 <div className="bg-white p-3 rounded-lg shadow-sm">
                   <div className="text-xs text-gray-500 uppercase tracking-wide">Sample Size</div>
@@ -2994,8 +3000,7 @@ export function FinalInspectionForm() {
                   <input
                     type="file"
                     accept="image/*"
-                    capture="environment"
-                    className="hidden"
+                            className="hidden"
                     onChange={(e) => handlePhotoChange(key as PhotoKey, e.target.files?.[0] || null)}
                   />
                 </label>
@@ -3031,8 +3036,7 @@ export function FinalInspectionForm() {
             <input
               type="file"
               accept="image/*"
-              capture="environment"
-              multiple
+                multiple
               className="hidden"
               onChange={(e) => handleOtherPhotosChange(e.target.files)}
             />

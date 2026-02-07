@@ -187,6 +187,7 @@ function normalizeAql(aql: string): string | null {
 
 /**
  * Calculate all AQL values from lot size and AQL level
+ * Per Z1.4-2008: If sample size >= lot size, do 100% inspection (sample size = lot size)
  */
 export function calculateAql(
   lotSize: number,
@@ -207,7 +208,20 @@ export function calculateAql(
     };
   }
 
-  return getAcceptReject(codeLetter, aql);
+  const result = getAcceptReject(codeLetter, aql);
+
+  // Z1.4-2008 Rule: If sample size >= lot size, do 100% inspection
+  // Cap sample size at lot size and use original code letter
+  if (result.isValid && result.sampleSize > lotSize) {
+    return {
+      ...result,
+      sampleSize: lotSize,
+      // Keep the accept/reject from the effective code letter (arrow result)
+      // but show the original code letter since we're doing 100% inspection
+    };
+  }
+
+  return result;
 }
 
 /**

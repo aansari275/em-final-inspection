@@ -4,6 +4,7 @@ import { Header } from './components/Header';
 import { FinalInspectionForm } from './components/FinalInspectionForm';
 import { InspectionList } from './components/InspectionList';
 import { EmailSettings } from './components/EmailSettings';
+import { PWAUpdatePrompt } from './components/PWAUpdatePrompt';
 import Login, { isAuthenticated, logout } from './components/Login';
 
 // Error Boundary to prevent blank white screens
@@ -74,6 +75,7 @@ function App() {
     <ErrorBoundary>
       <BrowserRouter>
         <div className="min-h-screen bg-gray-50">
+          <PWAUpdatePrompt />
           <Header onLogout={handleLogout} />
           <main className="max-w-4xl mx-auto px-4 py-6">
             <Routes>
