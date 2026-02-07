@@ -1556,113 +1556,334 @@ export function FinalInspectionForm() {
         const resultBg = inspection.inspectionResult === 'PASS' ? '#dcfce7' : '#fee2e2';
         const companyFullName = COMPANY_NAMES[inspection.company] || 'Eastern Mills';
 
-        const emailHtml = `
-          <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
-            <div style="background: #059669; color: white; padding: 20px; text-align: center;">
-              <h1 style="margin: 0;">${companyFullName}</h1>
-              <p style="margin: 5px 0 0;">Final Inspection Report</p>
-            </div>
+        // Helper for OK/NOT OK/NA status styling in email
+        const statusStyle = (val: string) => {
+          if (val === 'OK') return 'color: #16a34a; font-weight: bold;';
+          if (val === 'NOT OK') return 'color: #dc2626; font-weight: bold;';
+          return 'color: #9ca3af;'; // NA
+        };
+        const statusLabel = (val: string) => val || 'NA';
 
-            <div style="background: ${resultBg}; padding: 20px; text-align: center; border-bottom: 3px solid ${resultColor};">
-              <h2 style="color: ${resultColor}; margin: 0; font-size: 28px;">
-                ${inspection.inspectionResult === 'PASS' ? '✓ PASSED' : '✗ FAILED'}
-              </h2>
-            </div>
+        // Build quality checks rows
+        const qualityChecks = [
+          { label: 'Approved Sample Available', value: inspection.approvedSampleAvailable },
+          { label: 'Material/Fibre Content', value: inspection.materialFibreContent || '-' },
+          { label: 'Motif/Design Check', value: inspection.motifDesignCheck, isStatus: true },
+          { label: 'Backing', value: inspection.backing, isStatus: true, note: inspection.backingNotes },
+          { label: 'Binding & Edges', value: inspection.bindingAndEdges, isStatus: true },
+          { label: 'Hand Feel', value: inspection.handFeel, isStatus: true },
+          { label: 'Embossing/Carving', value: inspection.embossingCarving, isStatus: true },
+          { label: 'Workmanship', value: inspection.workmanship, isStatus: true },
+          { label: 'Product Quality Weight', value: inspection.productQualityWeight, isStatus: true },
+        ];
+
+        const measurementRows = [
+          { label: 'Tuft Density', value: inspection.tuftDensity },
+          { label: 'Pile Height', value: inspection.pileHeight },
+          { label: 'Product Weight', value: inspection.productWeight },
+          { label: 'Size Tolerance', value: inspection.sizeTolerance },
+          { label: 'Finishing %', value: inspection.finishingPercent },
+          { label: 'Packed %', value: inspection.packedPercent },
+        ].filter(r => r.value);
+
+        const labelingChecks = [
+          { label: 'Label Placement', value: inspection.labelPlacement },
+          { label: 'Side Marking', value: inspection.sideMarking },
+          { label: 'Outer Marking', value: inspection.outerMarking },
+          { label: 'Inner Pack', value: inspection.innerPack },
+          { label: 'Care Labels', value: inspection.careLabels },
+          { label: 'SKU Stickers', value: inspection.skuStickers },
+          { label: 'UPC Barcodes', value: inspection.upcBarcodes },
+          { label: 'Product Label', value: inspection.productLabel },
+          { label: 'Carton Label', value: inspection.cartonLabel },
+          { label: 'Barcode Scan', value: inspection.barcodeScan },
+        ];
+
+        const packagingRows = [
+          { label: 'Carton Ply', value: inspection.cartonPly },
+          { label: 'Carton Drop Test', value: inspection.cartonDropTest, isStatus: true },
+          { label: 'Packing Type', value: inspection.packingType },
+          { label: 'Gross Weight', value: inspection.grossWeight },
+          { label: 'Net Weight', value: inspection.netWeight },
+          { label: 'Carton/Bale Numbering', value: inspection.cartonBaleNumbering, isStatus: true },
+          { label: 'Carton Dimension', value: inspection.cartonDimension, isStatus: true },
+          { label: 'Pcs per Carton/Bale', value: inspection.pcsPerCartonBale },
+          { label: 'Pcs per Polybag', value: inspection.pcsPerPolybag },
+          { label: 'Carton (L × W × H)', value: [inspection.cartonMeasurementL, inspection.cartonMeasurementW, inspection.cartonMeasurementH].filter(Boolean).join(' × ') || '' },
+        ];
+
+        // Build defects section
+        const hasDefects = inspection.defects && inspection.defects.length > 0 && inspection.defects.some(d => d.defectCode);
+
+        // Table styling constants
+        const tblBorder = 'border: 1px solid #d1d5db;';
+        const cellPad = 'padding: 8px 12px;';
+        const headerCell = `${tblBorder} ${cellPad} background-color: #059669; color: white; font-weight: bold; font-size: 13px;`;
+        const labelCell = `${tblBorder} ${cellPad} color: #374151; font-size: 13px; background-color: #f9fafb;`;
+        const valueCell = `${tblBorder} ${cellPad} color: #111827; font-size: 13px;`;
+        const sectionHeader = (title: string) => `
+          <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+            <tr><td style="${headerCell} text-align: center; font-size: 14px; letter-spacing: 0.5px;">${title}</td></tr>
+          </table>`;
+
+        const emailHtml = `
+          <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; background: #ffffff;">
+            <!-- Header -->
+            <table style="width: 100%; border-collapse: collapse; background: #059669;">
+              <tr>
+                <td style="padding: 24px; text-align: center; color: white;">
+                  <h1 style="margin: 0; font-size: 22px; letter-spacing: 1px;">${companyFullName}</h1>
+                  <p style="margin: 6px 0 0; font-size: 14px; opacity: 0.9;">Final Inspection Report</p>
+                </td>
+              </tr>
+            </table>
+
+            <!-- PASS/FAIL Banner -->
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="background: ${resultBg}; padding: 18px; text-align: center; border-bottom: 4px solid ${resultColor};">
+                  <span style="color: ${resultColor}; font-size: 28px; font-weight: bold; letter-spacing: 2px;">
+                    ${inspection.inspectionResult === 'PASS' ? '&#10003; PASSED' : '&#10007; FAILED'}
+                  </span>
+                  ${inspection.resultOverridden ? '<br><span style="color: #d97706; font-size: 12px; font-style: italic;">Inspector Override Applied</span>' : ''}
+                </td>
+              </tr>
+            </table>
 
             <div style="padding: 20px;">
-              <h3 style="color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px;">Order Information</h3>
+              <!-- Order Information -->
+              ${sectionHeader('ORDER INFORMATION')}
               <table style="width: 100%; border-collapse: collapse;">
-                <tr><td style="padding: 8px 0; color: #6b7280;">Date:</td><td style="padding: 8px 0;">${inspection.inspectionDate}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Inspector:</td><td style="padding: 8px 0;">${inspection.qcInspectorName}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Customer:</td><td style="padding: 8px 0;">${inspection.customerName} (${inspection.customerCode})</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Customer PO:</td><td style="padding: 8px 0;">${inspection.customerPoNo}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">OPS No.:</td><td style="padding: 8px 0;">${inspection.opsNo}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Design:</td><td style="padding: 8px 0;">${inspection.buyerDesignName} / ${inspection.emplDesignNo}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Color:</td><td style="padding: 8px 0;">${inspection.colorName}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Sizes:</td><td style="padding: 8px 0;">${inspection.productSizes}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Merchant:</td><td style="padding: 8px 0;">${inspection.merchant}</td></tr>
+                <tr>
+                  <td style="${labelCell} width: 35%;">Inspection Date</td>
+                  <td style="${valueCell}">${inspection.inspectionDate}</td>
+                  <td style="${labelCell} width: 15%;">Doc No.</td>
+                  <td style="${valueCell}">${inspection.documentNo}</td>
+                </tr>
+                <tr>
+                  <td style="${labelCell}">QC Inspector</td>
+                  <td style="${valueCell}">${inspection.qcInspectorName}</td>
+                  <td style="${labelCell}">Merchant</td>
+                  <td style="${valueCell}">${inspection.merchant}</td>
+                </tr>
+                <tr>
+                  <td style="${labelCell}">Customer</td>
+                  <td style="${valueCell}" colspan="3"><strong>${inspection.customerName}</strong> (${inspection.customerCode})</td>
+                </tr>
+                <tr>
+                  <td style="${labelCell}">Customer PO</td>
+                  <td style="${valueCell}">${inspection.customerPoNo}</td>
+                  <td style="${labelCell}">OPS No.</td>
+                  <td style="${valueCell}"><strong>${inspection.opsNo}</strong></td>
+                </tr>
+                <tr>
+                  <td style="${labelCell}">Buyer Design</td>
+                  <td style="${valueCell}">${inspection.buyerDesignName}</td>
+                  <td style="${labelCell}">EMPL Design</td>
+                  <td style="${valueCell}">${inspection.emplDesignNo}</td>
+                </tr>
+                <tr>
+                  <td style="${labelCell}">Color</td>
+                  <td style="${valueCell}">${inspection.colorName}</td>
+                  <td style="${labelCell}">Sizes</td>
+                  <td style="${valueCell}">${inspection.productSizes}</td>
+                </tr>
               </table>
 
+              <!-- Inspected Articles -->
               ${inspection.inspectedArticles && inspection.inspectedArticles.length > 0 ? `
-              <h3 style="color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; margin-top: 20px;">Inspected Articles</h3>
-              <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                <thead>
-                  <tr style="background-color: #f3f4f6;">
-                    <th style="padding: 8px; text-align: left; color: #374151;">Article</th>
-                    <th style="padding: 8px; text-align: left; color: #374151;">Size</th>
-                    <th style="padding: 8px; text-align: left; color: #374151;">Color</th>
-                    <th style="padding: 8px; text-align: right; color: #374151;">Total Pcs</th>
-                    <th style="padding: 8px; text-align: right; color: #374151;">Inspected</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${inspection.inspectedArticles.map(article => `
-                  <tr style="border-bottom: 1px solid #e5e7eb;">
-                    <td style="padding: 8px; color: #374151;">${article.articleName || '-'}</td>
-                    <td style="padding: 8px; color: #6b7280;">${article.size || '-'}</td>
-                    <td style="padding: 8px; color: #6b7280;">${article.color || '-'}</td>
-                    <td style="padding: 8px; text-align: right; color: #6b7280;">${article.pcs || 0}</td>
-                    <td style="padding: 8px; text-align: right; color: #00525e; font-weight: bold;">${article.inspectedQty || article.pcs || 0}</td>
-                  </tr>
-                  `).join('')}
-                </tbody>
-                <tfoot>
-                  <tr style="background-color: #f3f4f6; font-weight: bold;">
-                    <td colspan="3" style="padding: 8px; color: #374151;">Total</td>
-                    <td style="padding: 8px; text-align: right; color: #374151;">${inspection.inspectedArticles.reduce((sum, a) => sum + (a.pcs || 0), 0)}</td>
-                    <td style="padding: 8px; text-align: right; color: #00525e;">${inspection.inspectedArticles.reduce((sum, a) => sum + (a.inspectedQty || a.pcs || 0), 0)}</td>
-                  </tr>
-                </tfoot>
+              ${sectionHeader('INSPECTED ARTICLES')}
+              <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                <tr>
+                  <td style="${headerCell}">Article</td>
+                  <td style="${headerCell}">Size</td>
+                  <td style="${headerCell}">Color</td>
+                  <td style="${headerCell} text-align: right;">Total Pcs</td>
+                  <td style="${headerCell} text-align: right;">Inspected</td>
+                </tr>
+                ${inspection.inspectedArticles.map(article => `
+                <tr>
+                  <td style="${valueCell}">${article.articleName || '-'}</td>
+                  <td style="${valueCell}">${article.size || '-'}</td>
+                  <td style="${valueCell}">${article.color || '-'}</td>
+                  <td style="${valueCell} text-align: right;">${article.pcs || 0}</td>
+                  <td style="${valueCell} text-align: right; font-weight: bold; color: #059669;">${article.inspectedQty || article.pcs || 0}</td>
+                </tr>
+                `).join('')}
+                <tr style="font-weight: bold;">
+                  <td colspan="3" style="${labelCell}">Total</td>
+                  <td style="${labelCell} text-align: right;">${inspection.inspectedArticles.reduce((sum, a) => sum + (a.pcs || 0), 0)}</td>
+                  <td style="${labelCell} text-align: right; color: #059669;">${inspection.inspectedArticles.reduce((sum, a) => sum + (a.inspectedQty || a.pcs || 0), 0)}</td>
+                </tr>
               </table>
               ` : ''}
 
-              <h3 style="color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; margin-top: 20px;">Quantities</h3>
+              <!-- AQL & Quantities -->
+              ${sectionHeader('AQL SAMPLING & QUANTITIES')}
               <table style="width: 100%; border-collapse: collapse;">
-                <tr><td style="padding: 8px 0; color: #6b7280;">Total Order Qty:</td><td style="padding: 8px 0;">${inspection.totalOrderQty}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Inspected Lot:</td><td style="padding: 8px 0;">${inspection.inspectedLotQty}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">AQL / Sample Size:</td><td style="padding: 8px 0;">${inspection.aql} / ${inspection.sampleSize}</td></tr>
+                <tr>
+                  <td style="${labelCell} width: 35%;">Total Order Qty</td>
+                  <td style="${valueCell}">${inspection.totalOrderQty}</td>
+                  <td style="${labelCell} width: 15%;">Inspected Lot</td>
+                  <td style="${valueCell}">${inspection.inspectedLotQty}</td>
+                </tr>
+                <tr>
+                  <td style="${labelCell}">AQL Level</td>
+                  <td style="${valueCell}">${inspection.aql}</td>
+                  <td style="${labelCell}">Sample Size</td>
+                  <td style="${valueCell}"><strong>${inspection.sampleSize}</strong></td>
+                </tr>
                 ${inspection.codeLetter ? `
                 <tr>
-                  <td style="padding: 8px 0; color: #6b7280;">AQL Z1.4-2008:</td>
-                  <td style="padding: 8px 0;">
-                    Code: <strong>${inspection.effectiveCodeLetter || inspection.codeLetter}</strong> |
-                    Accept ≤ <span style="color: #22c55e; font-weight: bold;">${inspection.acceptNumber}</span> |
-                    Reject ≥ <span style="color: #ef4444; font-weight: bold;">${inspection.rejectNumber}</span>
-                    ${inspection.resultOverridden ? ' <em style="color: #d97706;">(Override)</em>' : ''}
-                  </td>
+                  <td style="${labelCell}">Code Letter</td>
+                  <td style="${valueCell}"><strong>${inspection.codeLetter}</strong>${inspection.effectiveCodeLetter && inspection.effectiveCodeLetter !== inspection.codeLetter ? ` &#8594; ${inspection.effectiveCodeLetter}` : ''}</td>
+                  <td style="${labelCell}">Standard</td>
+                  <td style="${valueCell}">Z1.4-2008 Level II</td>
                 </tr>
                 ` : ''}
-                <tr><td style="padding: 8px 0; color: #6b7280;">Accepted:</td><td style="padding: 8px 0; color: #22c55e; font-weight: bold;">${inspection.acceptedQty}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Rejected:</td><td style="padding: 8px 0; color: #ef4444; font-weight: bold;">${inspection.rejectedQty}</td></tr>
+                <tr>
+                  <td style="${labelCell}">Accept &#8804;</td>
+                  <td style="${valueCell}"><span style="color: #16a34a; font-weight: bold; font-size: 16px;">${inspection.acceptNumber ?? inspection.acceptedQty}</span></td>
+                  <td style="${labelCell}">Reject &#8805;</td>
+                  <td style="${valueCell}"><span style="color: #dc2626; font-weight: bold; font-size: 16px;">${inspection.rejectNumber ?? '-'}</span></td>
+                </tr>
+                <tr>
+                  <td style="${labelCell}">Accepted Qty</td>
+                  <td style="${valueCell} color: #16a34a; font-weight: bold;">${inspection.acceptedQty}</td>
+                  <td style="${labelCell}">Rejected Qty</td>
+                  <td style="${valueCell} color: #dc2626; font-weight: bold;">${inspection.rejectedQty}</td>
+                </tr>
               </table>
 
-              <h3 style="color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; margin-top: 20px;">Quality Checks</h3>
+              <!-- Product Quality Checks -->
+              ${sectionHeader('PRODUCT QUALITY CHECKS')}
               <table style="width: 100%; border-collapse: collapse;">
-                <tr><td style="padding: 8px 0; color: #6b7280;">Carton Dimension:</td><td style="padding: 8px 0;">${inspection.cartonDimension}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Product Label:</td><td style="padding: 8px 0;">${inspection.productLabel}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Carton Label:</td><td style="padding: 8px 0;">${inspection.cartonLabel}</td></tr>
-                <tr><td style="padding: 8px 0; color: #6b7280;">Barcode Scan:</td><td style="padding: 8px 0;">${inspection.barcodeScan}</td></tr>
+                ${qualityChecks.map(qc => `
+                <tr>
+                  <td style="${labelCell} width: 50%;">${qc.label}</td>
+                  <td style="${valueCell}${qc.isStatus ? ' ' + statusStyle(qc.value as string) : ''}">${qc.isStatus ? statusLabel(qc.value as string) : (qc.value || '-')}${qc.note ? ` <span style="color: #6b7280; font-weight: normal; font-size: 12px;">(${qc.note})</span>` : ''}</td>
+                </tr>
+                `).join('')}
               </table>
 
-              <h3 style="color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; margin-top: 20px;">QC Remarks</h3>
-              <p style="color: #374151;">${inspection.qcInspectorRemarks || 'No remarks'}</p>
+              <!-- Measurement Details -->
+              ${measurementRows.length > 0 ? `
+              ${sectionHeader('MEASUREMENT DETAILS')}
+              <table style="width: 100%; border-collapse: collapse;">
+                ${measurementRows.map((m, i) => {
+                  if (i % 2 === 0) {
+                    const next = measurementRows[i + 1];
+                    return `<tr>
+                      <td style="${labelCell} width: 25%;">${m.label}</td>
+                      <td style="${valueCell} width: 25%;"><strong>${m.value}</strong></td>
+                      ${next ? `<td style="${labelCell} width: 25%;">${next.label}</td><td style="${valueCell} width: 25%;"><strong>${next.value}</strong></td>` : `<td style="${labelCell} width: 25%;"></td><td style="${valueCell} width: 25%;"></td>`}
+                    </tr>`;
+                  }
+                  return '';
+                }).join('')}
+              </table>
+              ` : ''}
 
+              <!-- Labeling & Marking -->
+              ${sectionHeader('LABELING & MARKING')}
+              <table style="width: 100%; border-collapse: collapse;">
+                ${labelingChecks.map((lc, i) => {
+                  if (i % 2 === 0) {
+                    const next = labelingChecks[i + 1];
+                    return `<tr>
+                      <td style="${labelCell} width: 25%;">${lc.label}</td>
+                      <td style="${valueCell} width: 25%; ${statusStyle(lc.value as string)}">${statusLabel(lc.value as string)}</td>
+                      ${next ? `<td style="${labelCell} width: 25%;">${next.label}</td><td style="${valueCell} width: 25%; ${statusStyle(next.value as string)}">${statusLabel(next.value as string)}</td>` : `<td style="${labelCell} width: 25%;"></td><td style="${valueCell} width: 25%;"></td>`}
+                    </tr>`;
+                  }
+                  return '';
+                }).join('')}
+              </table>
+
+              <!-- Packaging -->
+              ${sectionHeader('PACKAGING')}
+              <table style="width: 100%; border-collapse: collapse;">
+                ${packagingRows.filter(r => r.value).map((pr, i, arr) => {
+                  if (i % 2 === 0) {
+                    const next = arr[i + 1];
+                    return `<tr>
+                      <td style="${labelCell} width: 25%;">${pr.label}</td>
+                      <td style="${valueCell} width: 25%;${pr.isStatus ? ' ' + statusStyle(pr.value as string) : ''}">${pr.isStatus ? statusLabel(pr.value as string) : pr.value}</td>
+                      ${next ? `<td style="${labelCell} width: 25%;">${next.label}</td><td style="${valueCell} width: 25%;${next.isStatus ? ' ' + statusStyle(next.value as string) : ''}">${next.isStatus ? statusLabel(next.value as string) : next.value}</td>` : `<td style="${labelCell} width: 25%;"></td><td style="${valueCell} width: 25%;"></td>`}
+                    </tr>`;
+                  }
+                  return '';
+                }).join('')}
+              </table>
+
+              <!-- Defects -->
+              ${hasDefects ? `
+              ${sectionHeader('DEFECT TRACKING')}
+              <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                <tr>
+                  <td style="${headerCell}">Code</td>
+                  <td style="${headerCell}">Description</td>
+                  <td style="${headerCell} text-align: center;">Major</td>
+                  <td style="${headerCell} text-align: center;">Minor</td>
+                </tr>
+                ${inspection.defects.filter(d => d.defectCode).map(d => `
+                <tr>
+                  <td style="${valueCell} font-weight: bold;">${d.defectCode}</td>
+                  <td style="${valueCell}">${d.description || '-'}</td>
+                  <td style="${valueCell} text-align: center;${d.majorCount > 0 ? ' color: #dc2626; font-weight: bold;' : ''}">${d.majorCount || 0}</td>
+                  <td style="${valueCell} text-align: center;${d.minorCount > 0 ? ' color: #d97706; font-weight: bold;' : ''}">${d.minorCount || 0}</td>
+                </tr>
+                `).join('')}
+                <tr style="font-weight: bold;">
+                  <td colspan="2" style="${labelCell}">Total Defects</td>
+                  <td style="${labelCell} text-align: center; color: #dc2626;">${inspection.defects.reduce((s, d) => s + (d.majorCount || 0), 0)}</td>
+                  <td style="${labelCell} text-align: center; color: #d97706;">${inspection.defects.reduce((s, d) => s + (d.minorCount || 0), 0)}</td>
+                </tr>
+              </table>
+              ` : ''}
+
+              <!-- QC Remarks -->
+              ${inspection.qcInspectorRemarks ? `
+              ${sectionHeader('QC INSPECTOR REMARKS')}
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr><td style="${valueCell} font-style: italic; line-height: 1.6;">${inspection.qcInspectorRemarks}</td></tr>
+              </table>
+              ` : ''}
+
+              <!-- Photos -->
               ${allPhotos.length > 0 ? `
-                <h3 style="color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; margin-top: 20px;">Photos</h3>
-                <div style="display: grid; gap: 20px;">
-                  ${allPhotos.map(photo => `
-                    <div>
-                      <p style="color: #6b7280; margin-bottom: 8px;">${photo.label}</p>
-                      <img src="${photo.url}" style="max-width: 100%; border-radius: 8px; border: 1px solid #e5e7eb;" alt="${photo.label}">
-                    </div>
-                  `).join('')}
-                </div>
+              ${sectionHeader('PHOTO DOCUMENTATION')}
+              <table style="width: 100%; border-collapse: collapse;">
+                ${allPhotos.map((photo, i) => {
+                  if (i % 2 === 0) {
+                    const next = allPhotos[i + 1];
+                    return `<tr>
+                      <td style="${tblBorder} padding: 8px; text-align: center; width: 50%; vertical-align: top;">
+                        <p style="color: #374151; font-size: 12px; font-weight: bold; margin: 0 0 6px;">${photo.label}</p>
+                        <img src="${photo.url}" style="max-width: 100%; max-height: 250px; border-radius: 4px;" alt="${photo.label}">
+                      </td>
+                      ${next ? `
+                      <td style="${tblBorder} padding: 8px; text-align: center; width: 50%; vertical-align: top;">
+                        <p style="color: #374151; font-size: 12px; font-weight: bold; margin: 0 0 6px;">${next.label}</p>
+                        <img src="${next.url}" style="max-width: 100%; max-height: 250px; border-radius: 4px;" alt="${next.label}">
+                      </td>` : `<td style="${tblBorder} padding: 8px;"></td>`}
+                    </tr>`;
+                  }
+                  return '';
+                }).join('')}
+              </table>
               ` : ''}
             </div>
 
-            <div style="background: #f3f4f6; padding: 15px; text-align: center; color: #6b7280; font-size: 12px;">
-              <p>${companyFullName} - Final Inspection Report</p>
-            </div>
+            <!-- Footer -->
+            <table style="width: 100%; border-collapse: collapse; background: #059669; margin-top: 20px;">
+              <tr>
+                <td style="padding: 16px; text-align: center; color: white; font-size: 12px;">
+                  <p style="margin: 0;">${companyFullName} - Final Inspection Report</p>
+                  <p style="margin: 4px 0 0; opacity: 0.8;">PDF report attached for complete documentation</p>
+                </td>
+              </tr>
+            </table>
           </div>
         `;
 
