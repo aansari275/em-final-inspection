@@ -162,10 +162,21 @@ All OK/NOT OK checks:
 
 ### Email Reports
 - **Sender:** "Eastern Quality" <abdulansari@easternmills.com>
-- **Subject:** `Final Inspection Report - [BUYER CODE] - PASS/FAIL`
-- HTML email with inspection summary (shows buyer code, not name)
+- **Subject:** `Final Inspection: [BUYER CODE] - [DESIGN] [PASS/FAIL]`
+- **Rich HTML email** with professional bordered-table layout matching PDF style:
+  - Order Information (date, doc no, inspector, merchant, customer, PO, OPS, design, color, sizes)
+  - Inspected Articles table with totals
+  - AQL Sampling & Quantities (code letter, accept/reject thresholds, Z1.4-2008 reference)
+  - Product Quality Checks — all 9 checks with color-coded OK/NOT OK/NA
+  - Measurement Details (tuft density, pile height, weight, tolerance, finishing %, packed %)
+  - Labeling & Marking — 10 checks in 2-column layout with status colors
+  - Packaging (carton ply, drop test, weights, dimensions, pcs per carton)
+  - Defect Tracking table (codes, descriptions, major/minor counts, totals)
+  - QC Inspector Remarks
+  - Photo Documentation — 2-column grid with labeled images
+- **Both email templates updated** (new submission in FinalInspectionForm + resend in InspectionList)
 - **PDF attachment** included
-- **Download link** as backup (PDF uploaded to Firebase Storage)
+- **Download link** as backup (PDF uploaded to Firebase Storage, resend uses link)
 - **Auto-CC merchants** linked with buyer code (primary + assistant)
 - Email settings stored in Firestore (synced across all devices)
 
