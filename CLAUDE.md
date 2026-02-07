@@ -147,7 +147,9 @@ All OK/NOT OK checks:
 - Labeled photos for Consumer Pieces and Unit Load
 - Custom labels saved to localStorage
 - All photos uploaded to Firebase Storage
-- **Camera AND gallery upload supported** (no forced camera-only on mobile)
+- **Camera/Gallery popover** — single camera icon, tap shows popover with "Take Photo" (opens device camera via `capture="environment"`) and "Choose from Gallery" (standard file picker)
+- Reusable `PhotoInputButtons` component used across all 7 photo upload areas
+- `NotOkPhotoUpload` component also uses the same popover pattern for inline quality check photos
 
 ### PDF Export
 - Professional bordered-table layout (Excel-style with cell borders)
