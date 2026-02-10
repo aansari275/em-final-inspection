@@ -40,6 +40,49 @@ import {
 } from '../types';
 import { Loader2, Upload, X, Camera, CheckCircle2, XCircle, Plus, Save, Search, Package, AlertCircle, ChevronDown, Calculator, Info, ImagePlus } from 'lucide-react';
 
+// Image compression utility - resizes and compresses before upload
+const compressImage = (file: File, maxWidth = 1400, quality = 0.55): Promise<File> => {
+  return new Promise((resolve) => {
+    // Skip non-image files
+    if (!file.type.startsWith('image/')) {
+      resolve(file);
+      return;
+    }
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      // Skip if already small enough
+      if (img.width <= maxWidth && file.size < 500 * 1024) {
+        resolve(file);
+        return;
+      }
+      const canvas = document.createElement('canvas');
+      const scale = Math.min(1, maxWidth / img.width);
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve(new File([blob], file.name, { type: 'image/jpeg' }));
+          } else {
+            resolve(file);
+          }
+        },
+        'image/jpeg',
+        quality
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file);
+    };
+    img.src = url;
+  });
+};
+
 // Draft interface
 interface DraftData {
   formData: FormDataState;
@@ -594,6 +637,7 @@ const initialFormData: FormDataState = {
 
 export function FinalInspectionForm() {
   const [loading, setLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
   const [success, setSuccess] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
   const [draftSaved, setDraftSaved] = useState(false);
@@ -1384,8 +1428,9 @@ export function FinalInspectionForm() {
   };
 
   const uploadPhoto = async (file: File, path: string): Promise<string> => {
+    const compressed = await compressImage(file);
     const storageRef = ref(storage, path);
-    await uploadBytes(storageRef, file);
+    await uploadBytes(storageRef, compressed);
     return getDownloadURL(storageRef);
   };
 
@@ -1393,96 +1438,117 @@ export function FinalInspectionForm() {
     e.preventDefault();
     setLoading(true);
     setSuccess(false);
+    setUploadProgress('Compressing images...');
 
     try {
       const timestamp = Date.now();
-      const photoUrls: Record<string, string> = {};
 
-      // Upload each required photo
+      // Collect ALL upload tasks first, then run in parallel
+      const uploadTasks: Array<{ key: string; file: File; path: string; category: string; index?: number; label?: string }> = [];
+
+      // Standard photos
       for (const photoType of PHOTO_TYPES) {
         const key = photoType.key as PhotoKey;
         const file = photos[key];
         if (file) {
-          const url = await uploadPhoto(
-            file,
-            `final-inspection-images/${timestamp}_${key}_${file.name}`
-          );
-          photoUrls[key] = url;
+          uploadTasks.push({ key, file, path: `final-inspection-images/${timestamp}_${key}_${file.name}`, category: 'standard' });
         }
       }
 
-      // Upload other photos
-      const otherPhotoUrls: string[] = [];
-      for (let i = 0; i < otherPhotos.length; i++) {
-        const url = await uploadPhoto(
-          otherPhotos[i],
-          `final-inspection-images/${timestamp}_other_${i}_${otherPhotos[i].name}`
-        );
-        otherPhotoUrls.push(url);
-      }
+      // Other photos
+      otherPhotos.forEach((file, i) => {
+        uploadTasks.push({ key: `other_${i}`, file, path: `final-inspection-images/${timestamp}_other_${i}_${file.name}`, category: 'other', index: i });
+      });
 
-      // Upload NOT OK photos
-      const notOkPhotoUrls: NotOkPhoto[] = [];
+      // NOT OK photos
       for (const [fieldKey, file] of Object.entries(notOkPhotos)) {
         if (file) {
-          const url = await uploadPhoto(
-            file,
-            `final-inspection-images/${timestamp}_notok_${fieldKey}_${file.name}`
-          );
-          notOkPhotoUrls.push({ field: fieldKey, photo: url });
+          uploadTasks.push({ key: `notok_${fieldKey}`, file, path: `final-inspection-images/${timestamp}_notok_${fieldKey}_${file.name}`, category: 'notok', label: fieldKey });
         }
       }
 
-      // Upload stacked goods photo
-      let stackedGoodsUrl = '';
+      // Stacked goods
       if (stackedGoodsPhoto) {
-        stackedGoodsUrl = await uploadPhoto(
-          stackedGoodsPhoto,
-          `final-inspection-images/${timestamp}_stacked_goods_${stackedGoodsPhoto.name}`
-        );
+        uploadTasks.push({ key: 'stacked_goods', file: stackedGoodsPhoto, path: `final-inspection-images/${timestamp}_stacked_goods_${stackedGoodsPhoto.name}`, category: 'stacked' });
       }
 
-      // Upload consumer pieces photos
-      const consumerPiecesUrls: Array<{ label: string; url: string }> = [];
-      for (let i = 0; i < consumerPieces.length; i++) {
-        const piece = consumerPieces[i];
+      // Consumer pieces
+      consumerPieces.forEach((piece, i) => {
         if (piece.file && piece.label) {
-          const url = await uploadPhoto(
-            piece.file,
-            `final-inspection-images/${timestamp}_consumer_${i}_${piece.file.name}`
-          );
-          consumerPiecesUrls.push({ label: piece.label, url });
+          uploadTasks.push({ key: `consumer_${i}`, file: piece.file, path: `final-inspection-images/${timestamp}_consumer_${i}_${piece.file.name}`, category: 'consumer', index: i, label: piece.label });
         }
-      }
+      });
 
-      // Upload unit load photos (if enabled)
-      const unitLoadPhotoUrls: Array<{ label: string; url: string }> = [];
+      // Unit load
       if (unitLoadEnabled) {
-        for (let i = 0; i < unitLoadPhotos.length; i++) {
-          const photo = unitLoadPhotos[i];
+        unitLoadPhotos.forEach((photo, i) => {
           if (photo.file && photo.label) {
-            const url = await uploadPhoto(
-              photo.file,
-              `final-inspection-images/${timestamp}_unitload_${i}_${photo.file.name}`
-            );
-            unitLoadPhotoUrls.push({ label: photo.label, url });
+            uploadTasks.push({ key: `unitload_${i}`, file: photo.file, path: `final-inspection-images/${timestamp}_unitload_${i}_${photo.file.name}`, category: 'unitload', index: i, label: photo.label });
           }
-        }
+        });
       }
 
-      // Upload construction photos
-      const constructionPhotoUrls: Record<string, string> = {};
+      // Construction photos
       for (const photoType of CONSTRUCTION_PHOTO_TYPES) {
         const key = photoType.key as ConstructionPhotoKey;
         const file = constructionPhotos[key];
         if (file) {
-          const url = await uploadPhoto(
-            file,
-            `final-inspection-images/${timestamp}_construction_${key}_${file.name}`
-          );
-          constructionPhotoUrls[key] = url;
+          uploadTasks.push({ key: `construction_${key}`, file, path: `final-inspection-images/${timestamp}_construction_${key}_${file.name}`, category: 'construction', label: key });
         }
       }
+
+      // Upload ALL photos in parallel batches of 5
+      const totalPhotos = uploadTasks.length;
+      setUploadProgress(totalPhotos > 0 ? `Uploading 0/${totalPhotos} photos...` : 'Saving...');
+      let completed = 0;
+      const results: Map<string, string> = new Map();
+
+      const BATCH_SIZE = 5;
+      for (let i = 0; i < uploadTasks.length; i += BATCH_SIZE) {
+        const batch = uploadTasks.slice(i, i + BATCH_SIZE);
+        const batchResults = await Promise.all(
+          batch.map(async (task) => {
+            const url = await uploadPhoto(task.file, task.path);
+            completed++;
+            setUploadProgress(`Uploading ${completed}/${totalPhotos} photos...`);
+            return { ...task, url };
+          })
+        );
+        batchResults.forEach(r => results.set(r.key, r.url));
+      }
+
+      // Map results back to expected structures
+      const photoUrls: Record<string, string> = {};
+      for (const photoType of PHOTO_TYPES) {
+        const key = photoType.key as PhotoKey;
+        if (results.has(key)) photoUrls[key] = results.get(key)!;
+      }
+
+      const otherPhotoUrls: string[] = otherPhotos.map((_, i) => results.get(`other_${i}`) || '').filter(Boolean);
+
+      const notOkPhotoUrls: NotOkPhoto[] = Object.keys(notOkPhotos)
+        .filter(fieldKey => notOkPhotos[fieldKey] && results.has(`notok_${fieldKey}`))
+        .map(fieldKey => ({ field: fieldKey, photo: results.get(`notok_${fieldKey}`)! }));
+
+      const stackedGoodsUrl = results.get('stacked_goods') || '';
+
+      const consumerPiecesUrls: Array<{ label: string; url: string }> = consumerPieces
+        .map((piece, i) => ({ label: piece.label, url: results.get(`consumer_${i}`) || '' }))
+        .filter(p => p.url && p.label);
+
+      const unitLoadPhotoUrls: Array<{ label: string; url: string }> = unitLoadEnabled
+        ? unitLoadPhotos
+            .map((photo, i) => ({ label: photo.label, url: results.get(`unitload_${i}`) || '' }))
+            .filter(p => p.url && p.label)
+        : [];
+
+      const constructionPhotoUrls: Record<string, string> = {};
+      for (const photoType of CONSTRUCTION_PHOTO_TYPES) {
+        const key = photoType.key as ConstructionPhotoKey;
+        if (results.has(`construction_${key}`)) constructionPhotoUrls[key] = results.get(`construction_${key}`)!;
+      }
+
+      setUploadProgress('Saving inspection...');
 
       const inspection: FinalInspection = {
         // Company & Document
@@ -1615,6 +1681,7 @@ export function FinalInspectionForm() {
       // Save to Firestore
       await addDoc(collection(db, 'final-inspections'), inspection);
 
+      setUploadProgress('Sending email...');
       // Generate PDF and send email (wrapped in try-catch to not fail submission)
       try {
         const recipients = await emailSettingsService.getRecipients();
@@ -2100,6 +2167,7 @@ export function FinalInspectionForm() {
       alert('Failed to submit inspection. Please try again.');
     } finally {
       setLoading(false);
+      setUploadProgress('');
     }
   };
 
@@ -3513,7 +3581,7 @@ export function FinalInspectionForm() {
               {loading ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  Submitting...
+                  {uploadProgress || 'Submitting...'}
                 </>
               ) : (
                 <>
