@@ -22,6 +22,7 @@ Final Inspection QC form application for Eastern Home Industries (EHI) and Easte
 - **`orders/data/orders`** - OPS orders for lookup (read)
 - **`empl_design_name`** - Shared design names (read/write)
 - **`settings/final_inspection_email`** - Email recipient settings (synced across devices)
+- **`final_inspection_drafts`** - Cloud-saved form drafts (accessible from any device)
 
 ## Firebase Storage Paths
 - **`final-inspection-images/`** - Inspection photos
@@ -164,7 +165,7 @@ All OK/NOT OK checks:
 
 ### Email Reports
 - **Sender:** "Eastern Quality" <abdulansari@easternmills.com>
-- **Subject:** `Final Inspection: [BUYER CODE] - [DESIGN] [PASS/FAIL]`
+- **Subject:** `Final Inspection: [BUYER CODE] / [OPS NO] - [DESIGN] [PASS/FAIL]`
 - **Rich HTML email** with professional bordered-table layout matching PDF style:
   - Order Information (date, doc no, inspector, merchant, customer, PO, OPS, design, color, sizes)
   - Inspected Articles table with totals
@@ -183,9 +184,19 @@ All OK/NOT OK checks:
 - Email settings stored in Firestore (synced across all devices)
 
 ### Draft System
-- Auto-save every 30 seconds
+- Auto-save every 30 seconds (localStorage + Firestore)
 - Manual save button
-- Draft restoration on page load
+- **Cloud drafts** saved to Firestore (`final_inspection_drafts` collection)
+- Drafts accessible from any device with the same login
+- "Cloud Drafts" panel to browse, resume, and delete saved drafts
+- Draft restoration on page load (local first, cloud as fallback)
+- On successful submission, cloud draft is automatically deleted
+
+### Submit Reliability
+- Image compression timeout (15s) — falls back to original file on mobile
+- Photo upload timeout (60s per photo) — prevents hanging on poor connections
+- Email/PDF generation timeout (90s) — submission completes even if email hangs
+- Inspection is saved to Firestore before email attempt, so data is never lost
 
 ### PWA (Progressive Web App)
 - **Installable** on mobile and desktop

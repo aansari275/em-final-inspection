@@ -2176,7 +2176,7 @@ export function FinalInspectionForm() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               to: allRecipients,
-              subject: `Final Inspection: ${inspection.customerCode} - ${inspection.buyerDesignName} [${inspection.inspectionResult}]`,
+              subject: `Final Inspection: ${inspection.customerCode}${inspection.opsNo ? ` / ${inspection.opsNo}` : ''} - ${inspection.buyerDesignName} [${inspection.inspectionResult}]`,
               html: emailHtml,
               pdfBase64,
               pdfFilename: `Final_Inspection_${inspection.opsNo}_${inspection.inspectionDate}.pdf`

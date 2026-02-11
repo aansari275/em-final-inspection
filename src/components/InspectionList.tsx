@@ -475,7 +475,7 @@ export function InspectionList() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           to: allRecipients,
-          subject: `Final Inspection Report - ${inspection.customerCode} - ${inspection.inspectionResult}`,
+          subject: `Final Inspection: ${inspection.customerCode}${inspection.opsNo ? ` / ${inspection.opsNo}` : ''} - ${(inspection as Record<string, unknown>).buyerDesignName || ''} [${inspection.inspectionResult}]`,
           html: emailHtml,
           pdfBase64: pdfBase64,
           pdfFilename: pdfFilename
