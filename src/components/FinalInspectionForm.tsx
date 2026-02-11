@@ -1769,11 +1769,11 @@ export function FinalInspectionForm() {
         sizeUnit: sizeUnit,
         // AQL Z1.4-2008 Calculation Fields
         inspectionLevel: 'II',
-        codeLetter: aqlCalculation?.codeLetter || undefined,
-        calculatedSampleSize: aqlCalculation?.sampleSize || undefined,
-        acceptNumber: aqlCalculation?.acceptNumber || undefined,
-        rejectNumber: aqlCalculation?.rejectNumber || undefined,
-        effectiveCodeLetter: aqlCalculation?.effectiveCodeLetter || undefined,
+        codeLetter: aqlCalculation?.codeLetter || null,
+        calculatedSampleSize: aqlCalculation?.sampleSize ?? null,
+        acceptNumber: aqlCalculation?.acceptNumber ?? null,
+        rejectNumber: aqlCalculation?.rejectNumber ?? null,
+        effectiveCodeLetter: aqlCalculation?.effectiveCodeLetter || null,
         isAutoResult: isAutoResult,
         resultOverridden: resultOverridden,
         // Results
