@@ -7,10 +7,12 @@ import {
   doc,
   getDoc,
   setDoc,
+  deleteDoc,
   query,
   orderBy,
   where,
   serverTimestamp,
+  Timestamp,
 } from 'firebase/firestore';
 import { getStorage, ref, uploadString, getDownloadURL } from 'firebase/storage';
 import type { Customer } from '../types';
@@ -450,6 +452,170 @@ export async function uploadPdfToStorage(pdfBase64: string, filename: string): P
     console.error('Error uploading PDF to storage:', error);
     throw error;
   }
+}
+
+// ============================================
+// Cloud Draft Persistence (Firestore)
+// ============================================
+
+const DRAFTS_COLLECTION = 'final_inspection_drafts';
+
+export interface CloudDraft {
+  id: string;
+  formData: Record<string, unknown>;
+  defects: Array<Record<string, unknown>>;
+  selectedSizes: string[];
+  sizeUnit: string;
+  // OPS-related
+  opsNo?: string;
+  customerName?: string;
+  customerCode?: string;
+  emplDesignNo?: string;
+  // Metadata
+  savedAt: string;
+  updatedAt: unknown; // serverTimestamp
+  createdAt: unknown;
+}
+
+/**
+ * Save or update a draft in Firestore
+ * Uses a deterministic ID based on form content to avoid duplicates
+ */
+export async function saveCloudDraft(
+  draftId: string | null,
+  data: {
+    formData: Record<string, unknown>;
+    defects: Array<Record<string, unknown>>;
+    selectedSizes: string[];
+    sizeUnit: string;
+  }
+): Promise<string> {
+  try {
+    const formData = data.formData as Record<string, string>;
+    const draftData = {
+      formData: data.formData,
+      defects: data.defects,
+      selectedSizes: data.selectedSizes,
+      sizeUnit: data.sizeUnit,
+      // Denormalized fields for list display
+      opsNo: formData.opsNo || '',
+      customerName: formData.customerName || '',
+      customerCode: formData.customerCode || '',
+      emplDesignNo: formData.emplDesignNo || '',
+      company: formData.company || '',
+      qcInspectorName: formData.qcInspectorName || '',
+      savedAt: new Date().toISOString(),
+      updatedAt: serverTimestamp(),
+    };
+
+    if (draftId) {
+      // Update existing draft
+      const draftRef = doc(db, DRAFTS_COLLECTION, draftId);
+      await setDoc(draftRef, draftData, { merge: true });
+      return draftId;
+    } else {
+      // Create new draft
+      const docRef = await addDoc(collection(db, DRAFTS_COLLECTION), {
+        ...draftData,
+        createdAt: serverTimestamp(),
+      });
+      return docRef.id;
+    }
+  } catch (error) {
+    console.error('Error saving cloud draft:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get all cloud drafts, sorted by most recently updated
+ */
+export async function getCloudDrafts(): Promise<CloudDraft[]> {
+  try {
+    const draftsRef = collection(db, DRAFTS_COLLECTION);
+    const q = query(draftsRef, orderBy('updatedAt', 'desc'));
+    const snapshot = await getDocs(q);
+
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        formData: (data.formData as Record<string, unknown>) || {},
+        defects: (data.defects as Array<Record<string, unknown>>) || [],
+        selectedSizes: (data.selectedSizes as string[]) || [],
+        sizeUnit: (data.sizeUnit as string) || 'cm',
+        opsNo: (data.opsNo as string) || '',
+        customerName: (data.customerName as string) || '',
+        customerCode: (data.customerCode as string) || '',
+        emplDesignNo: (data.emplDesignNo as string) || '',
+        savedAt: (data.savedAt as string) || '',
+        updatedAt: data.updatedAt,
+        createdAt: data.createdAt,
+      };
+    });
+  } catch (error) {
+    console.error('Error fetching cloud drafts:', error);
+    return [];
+  }
+}
+
+/**
+ * Get a single cloud draft by ID
+ */
+export async function getCloudDraft(draftId: string): Promise<CloudDraft | null> {
+  try {
+    const draftRef = doc(db, DRAFTS_COLLECTION, draftId);
+    const snapshot = await getDoc(draftRef);
+
+    if (!snapshot.exists()) return null;
+
+    const data = snapshot.data();
+    return {
+      id: snapshot.id,
+      formData: (data.formData as Record<string, unknown>) || {},
+      defects: (data.defects as Array<Record<string, unknown>>) || [],
+      selectedSizes: (data.selectedSizes as string[]) || [],
+      sizeUnit: (data.sizeUnit as string) || 'cm',
+      opsNo: (data.opsNo as string) || '',
+      customerName: (data.customerName as string) || '',
+      customerCode: (data.customerCode as string) || '',
+      emplDesignNo: (data.emplDesignNo as string) || '',
+      savedAt: (data.savedAt as string) || '',
+      updatedAt: data.updatedAt,
+      createdAt: data.createdAt,
+    };
+  } catch (error) {
+    console.error('Error fetching cloud draft:', error);
+    return null;
+  }
+}
+
+/**
+ * Delete a cloud draft
+ */
+export async function deleteCloudDraft(draftId: string): Promise<void> {
+  try {
+    const draftRef = doc(db, DRAFTS_COLLECTION, draftId);
+    await deleteDoc(draftRef);
+  } catch (error) {
+    console.error('Error deleting cloud draft:', error);
+    throw error;
+  }
+}
+
+/**
+ * Convert Firestore Timestamp to readable string
+ */
+export function timestampToString(ts: unknown): string {
+  if (!ts) return '';
+  if (ts instanceof Timestamp) {
+    return ts.toDate().toLocaleString();
+  }
+  if (typeof ts === 'object' && ts !== null && '_seconds' in ts) {
+    return new Date((ts as { _seconds: number })._seconds * 1000).toLocaleString();
+  }
+  if (typeof ts === 'string') return ts;
+  return '';
 }
 
 export default app;

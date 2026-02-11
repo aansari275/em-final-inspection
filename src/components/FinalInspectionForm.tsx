@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { collection, addDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, getCustomers, addCustomer, getDesignNames, addDesignName, DesignName, getOpsByNumber, getOpsList, OpsOrder, OpsOrderItem, getBuyerMerchantEmails } from '../lib/firebase';
+import { db, storage, getCustomers, addCustomer, getDesignNames, addDesignName, DesignName, getOpsByNumber, getOpsList, OpsOrder, OpsOrderItem, getBuyerMerchantEmails, saveCloudDraft, getCloudDrafts, deleteCloudDraft, CloudDraft } from '../lib/firebase';
 import { emailSettingsService } from '../lib/emailSettingsService';
 import { generateFinalInspectionPDF } from '../lib/pdfGenerator';
 import { calculateAql, wouldPass, AqlCalculationResult, LOT_SIZE_CODE_LETTERS, SAMPLE_SIZES, AQL_ACCEPT_REJECT_TABLE, AcceptRejectValue } from '../lib/aqlCalculator';
@@ -50,36 +50,63 @@ const compressImage = (file: File, maxWidth = 1400, quality = 0.55): Promise<Fil
     }
     const img = new Image();
     const url = URL.createObjectURL(file);
-    img.onload = () => {
+    let settled = false;
+    const finish = (result: File) => {
+      if (settled) return;
+      settled = true;
       URL.revokeObjectURL(url);
+      resolve(result);
+    };
+
+    // Timeout: if compression hangs on mobile, return original file after 15s
+    setTimeout(() => {
+      if (!settled) {
+        console.warn('Image compression timeout, using original:', file.name);
+        finish(file);
+      }
+    }, 15000);
+
+    img.onload = () => {
       // Skip if already small enough
       if (img.width <= maxWidth && file.size < 500 * 1024) {
-        resolve(file);
+        finish(file);
         return;
       }
-      const canvas = document.createElement('canvas');
-      const scale = Math.min(1, maxWidth / img.width);
-      canvas.width = img.width * scale;
-      canvas.height = img.height * scale;
-      const ctx = canvas.getContext('2d')!;
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob(
-        (blob) => {
-          if (blob) {
-            resolve(new File([blob], file.name, { type: 'image/jpeg' }));
-          } else {
-            resolve(file);
-          }
-        },
-        'image/jpeg',
-        quality
-      );
+      try {
+        const canvas = document.createElement('canvas');
+        const scale = Math.min(1, maxWidth / img.width);
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              finish(new File([blob], file.name, { type: 'image/jpeg' }));
+            } else {
+              finish(file);
+            }
+          },
+          'image/jpeg',
+          quality
+        );
+      } catch {
+        finish(file);
+      }
     };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve(file);
-    };
+    img.onerror = () => finish(file);
     img.src = url;
+  });
+};
+
+// Timeout wrapper - rejects after specified ms
+const withTimeout = <T,>(promise: Promise<T>, ms: number, label = 'Operation'): Promise<T> => {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
+    promise.then(
+      (val) => { clearTimeout(timer); resolve(val); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
   });
 };
 
@@ -643,6 +670,10 @@ export function FinalInspectionForm() {
   const [draftSaved, setDraftSaved] = useState(false);
   const [draftRestored, setDraftRestored] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [cloudDraftId, setCloudDraftId] = useState<string | null>(null);
+  const [showDraftsList, setShowDraftsList] = useState(false);
+  const [cloudDrafts, setCloudDrafts] = useState<CloudDraft[]>([]);
+  const [loadingDrafts, setLoadingDrafts] = useState(false);
 
   const [formData, setFormData] = useState<FormDataState>(initialFormData);
 
@@ -802,7 +833,7 @@ export function FinalInspectionForm() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Save draft function - saves form data to localStorage and photos to IndexedDB
+  // Save draft function - saves form data to localStorage, IndexedDB, AND Firestore
   const saveDraftRef = useRef<() => void>();
 
   const saveDraft = useCallback(() => {
@@ -810,7 +841,7 @@ export function FinalInspectionForm() {
       setDraftSaving(true);
       const now = new Date().toLocaleString();
 
-      // Save form data to localStorage
+      // Save form data to localStorage (fast, local backup)
       const draft: DraftData = {
         formData,
         defects,
@@ -819,6 +850,18 @@ export function FinalInspectionForm() {
         savedAt: now
       };
       localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+
+      // Save to Firestore (cloud, accessible from any device)
+      saveCloudDraft(cloudDraftId, {
+        formData: formData as unknown as Record<string, unknown>,
+        defects: defects as unknown as Array<Record<string, unknown>>,
+        selectedSizes,
+        sizeUnit,
+      }).then((id) => {
+        if (!cloudDraftId) setCloudDraftId(id);
+      }).catch((err) => {
+        console.warn('Cloud draft save failed (local backup exists):', err);
+      });
 
       // Save photo previews to IndexedDB (async, don't wait)
       const photoDraft: PhotoDraftData = {
@@ -849,7 +892,7 @@ export function FinalInspectionForm() {
     } finally {
       setDraftSaving(false);
     }
-  }, [formData, defects, selectedSizes, sizeUnit, photoPreviews, constructionPreviews, notOkPreviews, stackedGoodsPreview, consumerPieces, unitLoadPhotos, otherPreviews, unitLoadEnabled]);
+  }, [formData, defects, selectedSizes, sizeUnit, photoPreviews, constructionPreviews, notOkPreviews, stackedGoodsPreview, consumerPieces, unitLoadPhotos, otherPreviews, unitLoadEnabled, cloudDraftId]);
 
   // Keep ref updated for event handlers that capture stale closures
   useEffect(() => {
@@ -917,11 +960,71 @@ export function FinalInspectionForm() {
     try {
       localStorage.removeItem(DRAFT_STORAGE_KEY);
       clearPhotoDraft().catch(console.error);
+      // Delete cloud draft too
+      if (cloudDraftId) {
+        deleteCloudDraft(cloudDraftId).catch(console.error);
+        setCloudDraftId(null);
+      }
       setLastSavedAt(null);
     } catch (error) {
       console.error('Error clearing draft:', error);
     }
+  }, [cloudDraftId]);
+
+  // Load cloud drafts list
+  const loadCloudDrafts = useCallback(async () => {
+    setLoadingDrafts(true);
+    try {
+      const drafts = await getCloudDrafts();
+      setCloudDrafts(drafts);
+    } catch (error) {
+      console.error('Error loading cloud drafts:', error);
+    } finally {
+      setLoadingDrafts(false);
+    }
   }, []);
+
+  // Resume a cloud draft
+  const resumeCloudDraft = useCallback(async (draft: CloudDraft) => {
+    try {
+      setFormData(draft.formData as unknown as FormDataState);
+      setDefects((draft.defects || []) as unknown as Defect[]);
+      setSelectedSizes(draft.selectedSizes || []);
+      setSizeUnit((draft.sizeUnit || 'cm') as SizeUnit);
+      setCloudDraftId(draft.id);
+      setLastSavedAt(draft.savedAt);
+      setShowDraftsList(false);
+      setDraftRestored(true);
+      setTimeout(() => setDraftRestored(false), 5000);
+
+      // Also save locally for photo persistence
+      const localDraft: DraftData = {
+        formData: draft.formData as unknown as FormDataState,
+        defects: (draft.defects || []) as unknown as Defect[],
+        selectedSizes: draft.selectedSizes || [],
+        sizeUnit: (draft.sizeUnit || 'cm') as SizeUnit,
+        savedAt: draft.savedAt,
+      };
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(localDraft));
+    } catch (error) {
+      console.error('Error resuming cloud draft:', error);
+      alert('Failed to load draft. Please try again.');
+    }
+  }, []);
+
+  // Delete a cloud draft from the list
+  const handleDeleteCloudDraft = useCallback(async (draftId: string) => {
+    if (!confirm('Delete this draft?')) return;
+    try {
+      await deleteCloudDraft(draftId);
+      setCloudDrafts(prev => prev.filter(d => d.id !== draftId));
+      if (cloudDraftId === draftId) {
+        setCloudDraftId(null);
+      }
+    } catch (error) {
+      console.error('Error deleting cloud draft:', error);
+    }
+  }, [cloudDraftId]);
 
   // Debounced auto-save - triggers 3 seconds after changes stop
   const debouncedSave = useCallback(
@@ -1430,7 +1533,8 @@ export function FinalInspectionForm() {
   const uploadPhoto = async (file: File, path: string): Promise<string> => {
     const compressed = await compressImage(file);
     const storageRef = ref(storage, path);
-    await uploadBytes(storageRef, compressed);
+    // 60s timeout per photo upload to prevent hanging on poor connections
+    await withTimeout(uploadBytes(storageRef, compressed), 60000, `Upload ${file.name}`);
     return getDownloadURL(storageRef);
   };
 
@@ -1682,8 +1786,9 @@ export function FinalInspectionForm() {
       await addDoc(collection(db, 'final-inspections'), inspection);
 
       setUploadProgress('Sending email...');
-      // Generate PDF and send email (wrapped in try-catch to not fail submission)
+      // Generate PDF and send email with 90s timeout (wrapped in try-catch to not fail submission)
       try {
+        await withTimeout((async () => {
         const recipients = await emailSettingsService.getRecipients();
 
         // Auto-add merchant emails (primary and assistant) linked with buyer code
@@ -2087,6 +2192,7 @@ export function FinalInspectionForm() {
           // Don't block submission if email fails
         }
         }
+      })(), 90000, 'Email sending');
       } catch (emailSetupError) {
         console.warn('Email setup error (inspection saved successfully):', emailSetupError);
         // Don't block submission if email setup fails - inspection was already saved
@@ -2161,6 +2267,8 @@ export function FinalInspectionForm() {
       setOpsSearchValue('');
       setSelectedArticles([]);
       setOpsError('');
+      // Reset cloud draft ID (draft was deleted by clearDraft)
+      setCloudDraftId(null);
 
     } catch (error) {
       console.error('Error submitting inspection:', error);
@@ -2196,6 +2304,86 @@ export function FinalInspectionForm() {
           >
             <X className="w-4 h-4" />
           </button>
+        </div>
+      )}
+
+      {/* Cloud Drafts Button */}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => { setShowDraftsList(!showDraftsList); if (!showDraftsList) loadCloudDrafts(); }}
+          className="text-sm text-emerald-600 hover:text-emerald-700 flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-emerald-50 transition-colors"
+        >
+          <Save className="w-4 h-4" />
+          {showDraftsList ? 'Hide Drafts' : 'Cloud Drafts'}
+          {cloudDraftId && <span className="w-2 h-2 rounded-full bg-emerald-500" />}
+        </button>
+      </div>
+
+      {/* Cloud Drafts List */}
+      {showDraftsList && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-700">Saved Drafts (Cloud)</h3>
+            <button type="button" onClick={() => setShowDraftsList(false)} className="text-gray-400 hover:text-gray-600">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          {loadingDrafts ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="w-5 h-5 animate-spin text-emerald-500" />
+              <span className="ml-2 text-sm text-gray-500">Loading drafts...</span>
+            </div>
+          ) : cloudDrafts.length === 0 ? (
+            <p className="text-sm text-gray-400 py-4 text-center">No saved drafts found</p>
+          ) : (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {cloudDrafts.map(draft => (
+                <div
+                  key={draft.id}
+                  className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                    cloudDraftId === draft.id
+                      ? 'border-emerald-300 bg-emerald-50'
+                      : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => resumeCloudDraft(draft)}
+                    className="flex-1 text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-800">
+                        {draft.opsNo || draft.customerName || 'New Inspection'}
+                      </span>
+                      {draft.customerCode && (
+                        <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">
+                          {draft.customerCode}
+                        </span>
+                      )}
+                      {cloudDraftId === draft.id && (
+                        <span className="text-xs px-1.5 py-0.5 bg-emerald-100 text-emerald-600 rounded font-medium">
+                          Current
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {draft.emplDesignNo && `${draft.emplDesignNo} · `}
+                      Saved {new Date(draft.savedAt).toLocaleString()}
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleDeleteCloudDraft(draft.id); }}
+                    className="ml-2 p-1.5 text-gray-300 hover:text-red-500 rounded transition-colors"
+                    title="Delete draft"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
