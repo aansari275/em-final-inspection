@@ -795,16 +795,19 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
   }
   if (packagingPhotos.length > 0) photoGroups.push({ title: 'Packaging & Consumer Pieces', photos: packagingPhotos });
 
-  // Group 5: NOT OK Evidence Photos
-  const notOkPhotosList: PhotoItem[] = [];
+  // Group 5: Quality Check Photos (NOT OK evidence + photos on OK/NA fields)
+  const checkPhotosList: PhotoItem[] = [];
   if (inspection.notOkPhotos && inspection.notOkPhotos.length > 0) {
     for (const notOkPhoto of inspection.notOkPhotos) {
       const fieldInfo = OK_NOT_OK_FIELDS.find((f: { key: string }) => f.key === notOkPhoto.field);
       const fieldLabel = fieldInfo ? fieldInfo.label : notOkPhoto.field;
-      if (notOkPhoto.photo) notOkPhotosList.push({ url: notOkPhoto.photo, label: `NOT OK - ${fieldLabel}` });
+      // Use actual field status instead of assuming NOT OK
+      const fieldStatus = (inspection as Record<string, unknown>)[notOkPhoto.field] as string || '';
+      const statusTag = fieldStatus === 'NOT OK' ? 'NOT OK' : fieldStatus === 'OK' ? 'OK' : fieldStatus || '';
+      if (notOkPhoto.photo) checkPhotosList.push({ url: notOkPhoto.photo, label: `${fieldLabel} [${statusTag}]` });
     }
   }
-  if (notOkPhotosList.length > 0) photoGroups.push({ title: 'Defect Evidence', photos: notOkPhotosList });
+  if (checkPhotosList.length > 0) photoGroups.push({ title: 'Quality Check Photos', photos: checkPhotosList });
 
   // Group 6: Other Photos
   const otherPhotosList: PhotoItem[] = [];

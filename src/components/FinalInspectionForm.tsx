@@ -1755,13 +1755,13 @@ export function FinalInspectionForm() {
         inspectedArticles: selectedArticles
           .filter(a => a.selected)
           .map(a => ({
-            articleName: a.articleName,
-            size: a.size,
-            color: a.color,
-            quality: a.quality,
-            pcs: a.pcs,
-            sqm: a.sqm,
-            inspectedQty: a.inspectedQty || a.pcs,
+            articleName: a.articleName || '',
+            size: a.size || '',
+            color: a.color || '',
+            quality: a.quality || '',
+            pcs: a.pcs || 0,
+            sqm: a.sqm || 0,
+            inspectedQty: a.inspectedQty || a.pcs || 0,
           })),
         // NOT OK photos
         notOkPhotos: notOkPhotoUrls,
@@ -1782,8 +1782,11 @@ export function FinalInspectionForm() {
         createdAt: new Date().toISOString()
       };
 
+      // Strip undefined values (Firestore rejects them)
+      const cleanInspection = JSON.parse(JSON.stringify(inspection));
+
       // Save to Firestore
-      await addDoc(collection(db, 'final-inspections'), inspection);
+      await addDoc(collection(db, 'final-inspections'), cleanInspection);
 
       setUploadProgress('Sending email...');
       // Generate PDF and send email with 90s timeout (wrapped in try-catch to not fail submission)
@@ -1832,7 +1835,15 @@ export function FinalInspectionForm() {
           ...(inspection.constructionPhotos?.pileHeightPhoto ? [{ url: inspection.constructionPhotos.pileHeightPhoto, label: 'Pile Height' }] : []),
           ...(inspection.constructionPhotos?.productNetWeightPhoto ? [{ url: inspection.constructionPhotos.productNetWeightPhoto, label: 'Product Net Weight' }] : []),
           ...(inspection.constructionPhotos?.productGrossWeightPhoto ? [{ url: inspection.constructionPhotos.productGrossWeightPhoto, label: 'Product Gross Weight' }] : []),
-          ...inspection.otherPhotos.map((url, i) => ({ url, label: `Other ${i + 1}` }))
+          ...inspection.otherPhotos.map((url, i) => ({ url, label: `Other ${i + 1}` })),
+          // Quality check photos (NOT OK evidence + photos on OK/NA fields)
+          ...(inspection.notOkPhotos || []).map(p => {
+            const fieldInfo = OK_NOT_OK_FIELDS.find(f => f.key === p.field);
+            const fieldLabel = fieldInfo ? fieldInfo.label : p.field;
+            const fieldStatus = (inspection as Record<string, unknown>)[p.field] as string || '';
+            const statusTag = fieldStatus === 'NOT OK' ? 'NOT OK' : fieldStatus === 'OK' ? 'OK' : fieldStatus || '';
+            return { url: p.photo, label: `${fieldLabel} [${statusTag}]` };
+          })
         ].filter(p => p.url);
 
         const resultColor = inspection.inspectionResult === 'PASS' ? '#22c55e' : '#ef4444';
