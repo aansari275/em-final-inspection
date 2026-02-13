@@ -63,8 +63,9 @@ export default defineConfig({
         // This prevents the page from refreshing and losing form data
         skipWaiting: false,
         clientsClaim: false,
-        // Navigation preload for faster page loads
-        navigationPreload: true,
+        // Navigation preload disabled - conflicts with precache-first SPA strategy
+        // causing "preloadResponse cancelled" errors and intermittent page stalls
+        navigationPreload: false,
         runtimeCaching: [
           {
             // Cache Google Fonts
