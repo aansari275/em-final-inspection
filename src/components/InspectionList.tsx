@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, query, orderBy, getDocs, deleteDoc, doc } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { db, getBuyerMerchantEmails, uploadPdfToStorage } from '../lib/firebase';
 import { FinalInspection, COMPANY_NAMES, Company, Defect } from '../types';
 import { generateFinalInspectionPDF } from '../lib/pdfGenerator';
@@ -496,6 +496,10 @@ export function InspectionList() {
 
       const result = await response.json();
       if (result.success) {
+        // Update emailStatus in Firestore
+        await updateDoc(doc(db, 'final-inspections', inspection.id), { emailStatus: 'sent' }).catch(() => {});
+        // Update local state
+        setInspections(prev => prev.map(i => i.id === inspection.id ? { ...i, emailStatus: 'sent' } as typeof i : i));
         alert(`Email sent successfully to ${allRecipients.length} recipient(s) with PDF download link!`);
       } else {
         throw new Error(result.error || 'Failed to send email');
@@ -561,6 +565,22 @@ export function InspectionList() {
                 {inspection.company && (
                   <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
                     {inspection.company}
+                  </span>
+                )}
+                {/* Email status badge */}
+                {(inspection as Record<string, unknown>).emailStatus === 'failed' && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">
+                    Email Failed
+                  </span>
+                )}
+                {(inspection as Record<string, unknown>).emailStatus === 'sending' && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 font-medium">
+                    Sending...
+                  </span>
+                )}
+                {(inspection as Record<string, unknown>).emailStatus === 'sent' && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">
+                    Email Sent
                   </span>
                 )}
               </div>

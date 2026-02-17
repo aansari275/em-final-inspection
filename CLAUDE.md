@@ -192,11 +192,21 @@ All OK/NOT OK checks:
 - Draft restoration on page load (local first, cloud as fallback)
 - On successful submission, cloud draft is automatically deleted
 
-### Submit Reliability
+### Submit Reliability (Redesigned Feb 2026)
+**Problem:** Image-heavy inspections (20+ photos) failed because PDF generation re-downloaded all images within a 90s timeout.
+
+**Solution: Save Instantly + Background Email**
+- **Instant save:** Inspection saved to Firestore immediately after photo upload → success toast + form reset
+- **Background email:** PDF generation + email fires independently (no timeout cap)
+- **Smart thumbnails:** >30 images → 400px thumbnails (vs 1600px full-res), keeping PDF under 20MB
+- **Auto-retry:** 3 attempts with 10s delay between failures
+- **`emailStatus` tracked in Firestore:** `pending` → `sending` → `sent` | `failed`
+- **`beforeunload` guard:** Warns user if closing browser while email is sending
+- **Progress indicator:** "Processing image 15 of 47..." shown in blue banner
+- **Resend from list:** Failed emails show badge in InspectionList, existing resend button updates status
 - Image compression timeout (15s) — falls back to original file on mobile
 - Photo upload timeout (60s per photo) — prevents hanging on poor connections
-- Email/PDF generation timeout (90s) — submission completes even if email hangs
-- Inspection is saved to Firestore before email attempt, so data is never lost
+- PDF image batch size: 10 (up from 6) for faster processing
 
 ### PWA (Progressive Web App)
 - **Installable** on mobile and desktop
@@ -205,6 +215,7 @@ All OK/NOT OK checks:
 - Standalone mode (no browser UI)
 - **Prompt-based updates** (user chooses when to update, prevents data loss)
 - Keep-alive mechanism prevents OS from killing PWA during long inspections
+- **navigationPreload: false** — disabled because it conflicts with precache-first SPA strategy, causing "preloadResponse cancelled" errors and intermittent page stalls (fixed Feb 2026)
 
 ### AQL Z1.4-2008 Auto-Calculation
 Implements ANSI/ASQ Z1.4-2008 standard for acceptance sampling:

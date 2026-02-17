@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { collection, addDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage, getCustomers, addCustomer, getDesignNames, addDesignName, DesignName, getOpsByNumber, getOpsList, OpsOrder, OpsOrderItem, getBuyerMerchantEmails, saveCloudDraft, getCloudDrafts, deleteCloudDraft, CloudDraft } from '../lib/firebase';
 import { emailSettingsService } from '../lib/emailSettingsService';
@@ -666,6 +666,11 @@ export function FinalInspectionForm() {
   const [loading, setLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
   const [success, setSuccess] = useState(false);
+  // Background email state
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailProgress, setEmailProgress] = useState('');
+  const [emailFailed, setEmailFailed] = useState(false);
+  const [emailImageCount, setEmailImageCount] = useState(0);
   const [draftSaving, setDraftSaving] = useState(false);
   const [draftSaved, setDraftSaved] = useState(false);
   const [draftRestored, setDraftRestored] = useState(false);
@@ -1784,14 +1789,108 @@ export function FinalInspectionForm() {
 
       // Strip undefined values (Firestore rejects them)
       const cleanInspection = JSON.parse(JSON.stringify(inspection));
+      cleanInspection.emailStatus = 'pending';
 
       // Save to Firestore
-      await addDoc(collection(db, 'final-inspections'), cleanInspection);
+      const docRef = await addDoc(collection(db, 'final-inspections'), cleanInspection);
+      const savedDocId = docRef.id;
 
-      setUploadProgress('Sending email...');
-      // Generate PDF and send email with 90s timeout (wrapped in try-catch to not fail submission)
-      try {
-        await withTimeout((async () => {
+      // ─── SUCCESS! Form is saved. Show success and reset immediately. ───
+      setSuccess(true);
+      clearDraft();
+      // Count total images for the email banner
+      const totalImageCount = uploadTasks.length;
+      setEmailImageCount(totalImageCount);
+      setLoading(false);
+      setUploadProgress('');
+
+      // Reset form state (moved up from bottom of try block)
+      setFormData({
+        ...initialFormData,
+        inspectionDate: new Date().toISOString().split('T')[0]
+      });
+      setDefects([]);
+      setSelectedSizes([]);
+      setNotOkPhotos({});
+      setNotOkPreviews({});
+      setSizeUnit('cm');
+      setPhotos({
+        approvedSamplePhoto: null,
+        redSealFrontPhoto: null,
+        redSealBackPhoto: null,
+        redSealCloseUpPhoto: null,
+        redSealProductFront: null,
+        redSealProductBack: null,
+        labelPhoto: null,
+        moisturePhoto: null,
+        sizeFrontPhoto: null,
+        sizeSidePhoto: null,
+        inspectedSamplesPhoto: null,
+        metalCheckingPhoto: null,
+      });
+      setPhotoPreviews({
+        approvedSamplePhoto: '',
+        redSealFrontPhoto: '',
+        redSealBackPhoto: '',
+        redSealCloseUpPhoto: '',
+        redSealProductFront: '',
+        redSealProductBack: '',
+        labelPhoto: '',
+        moisturePhoto: '',
+        sizeFrontPhoto: '',
+        sizeSidePhoto: '',
+        inspectedSamplesPhoto: '',
+        metalCheckingPhoto: '',
+      });
+      setConstructionPhotos({
+        warpPer10cm: null,
+        weftPer10cm: null,
+        pileHeightPhoto: null,
+        productNetWeightPhoto: null,
+        productGrossWeightPhoto: null,
+      });
+      setConstructionPreviews({
+        warpPer10cm: '',
+        weftPer10cm: '',
+        pileHeightPhoto: '',
+        productNetWeightPhoto: '',
+        productGrossWeightPhoto: '',
+      });
+      setOtherPhotos([]);
+      setOtherPreviews([]);
+      setStackedGoodsPhoto(null);
+      setStackedGoodsPreview('');
+      setConsumerPieces([]);
+      setUnitLoadEnabled(false);
+      setUnitLoadPhotos([]);
+      setOpsData(null);
+      setOpsSearchValue('');
+      setSelectedArticles([]);
+      setOpsError('');
+      setCloudDraftId(null);
+
+      // ─── BACKGROUND: Generate PDF + Send Email (non-blocking) ───
+      // beforeunload guard while email is sending
+      const beforeUnloadHandler = (e: BeforeUnloadEvent) => {
+        e.preventDefault();
+        e.returnValue = 'Email is still sending. Are you sure you want to leave?';
+      };
+      window.addEventListener('beforeunload', beforeUnloadHandler);
+      setEmailSending(true);
+      setEmailProgress('Preparing email...');
+      setEmailFailed(false);
+
+      // Fire and forget — runs independently of form state
+      (async () => {
+        const MAX_RETRIES = 3;
+        const RETRY_DELAY = 10000;
+
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            // Update Firestore status
+            await updateDoc(doc(db, 'final-inspections', savedDocId), { emailStatus: 'sending' });
+            setEmailProgress('Getting recipients...');
+
         const recipients = await emailSettingsService.getRecipients();
 
         // Auto-add merchant emails (primary and assistant) linked with buyer code
@@ -1811,7 +1910,8 @@ export function FinalInspectionForm() {
         }
 
         if (allRecipients.length > 0) {
-        const pdfBase64 = await generateFinalInspectionPDF(inspection);
+        setEmailProgress(`Generating PDF with ${totalImageCount} images...`);
+        const pdfBase64 = await generateFinalInspectionPDF(inspection, (msg) => setEmailProgress(msg));
 
         const allPhotos = [
           { url: inspection.approvedSamplePhoto, label: 'Approved Sample' },
@@ -2181,6 +2281,7 @@ export function FinalInspectionForm() {
           </div>
         `;
 
+        setEmailProgress('Sending email...');
         try {
           const emailResponse = await fetch('/.netlify/functions/send-email', {
             method: 'POST',
@@ -2195,91 +2296,38 @@ export function FinalInspectionForm() {
           });
 
           if (!emailResponse.ok) {
-            console.warn('Email sending failed:', emailResponse.status);
-            // Don't block submission if email fails
+            throw new Error(`Email API returned ${emailResponse.status}`);
           }
         } catch (emailError) {
-          console.warn('Email sending error (inspection saved successfully):', emailError);
-          // Don't block submission if email fails
+          throw emailError; // Let retry loop handle it
         }
         }
-      })(), 90000, 'Email sending');
-      } catch (emailSetupError) {
-        console.warn('Email setup error (inspection saved successfully):', emailSetupError);
-        // Don't block submission if email setup fails - inspection was already saved
-      }
 
-      setSuccess(true);
-      // Clear draft after successful submission
-      clearDraft();
-      // Reset form
-      setFormData({
-        ...initialFormData,
-        inspectionDate: new Date().toISOString().split('T')[0]
-      });
-      setDefects([]);
-      setSelectedSizes([]);
-      setNotOkPhotos({});
-      setNotOkPreviews({});
-      setSizeUnit('cm');
-      setPhotos({
-        approvedSamplePhoto: null,
-        redSealFrontPhoto: null,
-        redSealBackPhoto: null,
-        redSealCloseUpPhoto: null,
-        redSealProductFront: null,
-        redSealProductBack: null,
-        labelPhoto: null,
-        moisturePhoto: null,
-        sizeFrontPhoto: null,
-        sizeSidePhoto: null,
-        inspectedSamplesPhoto: null,
-        metalCheckingPhoto: null,
-      });
-      setPhotoPreviews({
-        approvedSamplePhoto: '',
-        redSealFrontPhoto: '',
-        redSealBackPhoto: '',
-        redSealCloseUpPhoto: '',
-        redSealProductFront: '',
-        redSealProductBack: '',
-        labelPhoto: '',
-        moisturePhoto: '',
-        sizeFrontPhoto: '',
-        sizeSidePhoto: '',
-        inspectedSamplesPhoto: '',
-        metalCheckingPhoto: '',
-      });
-      // Reset construction photos
-      setConstructionPhotos({
-        warpPer10cm: null,
-        weftPer10cm: null,
-        pileHeightPhoto: null,
-        productNetWeightPhoto: null,
-        productGrossWeightPhoto: null,
-      });
-      setConstructionPreviews({
-        warpPer10cm: '',
-        weftPer10cm: '',
-        pileHeightPhoto: '',
-        productNetWeightPhoto: '',
-        productGrossWeightPhoto: '',
-      });
-      setOtherPhotos([]);
-      setOtherPreviews([]);
-      // Reset new Images section
-      setStackedGoodsPhoto(null);
-      setStackedGoodsPreview('');
-      setConsumerPieces([]);
-      setUnitLoadEnabled(false);
-      setUnitLoadPhotos([]);
-      // Reset OPS data
-      setOpsData(null);
-      setOpsSearchValue('');
-      setSelectedArticles([]);
-      setOpsError('');
-      // Reset cloud draft ID (draft was deleted by clearDraft)
-      setCloudDraftId(null);
+            // Email sent successfully
+            await updateDoc(doc(db, 'final-inspections', savedDocId), { emailStatus: 'sent' });
+            setEmailSending(false);
+            setEmailProgress('');
+            setEmailFailed(false);
+            window.removeEventListener('beforeunload', beforeUnloadHandler);
+            return; // Success — exit retry loop
+
+          } catch (retryError) {
+            console.warn(`Email attempt ${attempt}/${MAX_RETRIES} failed:`, retryError);
+            if (attempt < MAX_RETRIES) {
+              setEmailProgress(`Email failed, retrying in 10s (attempt ${attempt + 1}/${MAX_RETRIES})...`);
+              await new Promise(r => setTimeout(r, RETRY_DELAY));
+            } else {
+              // All retries exhausted
+              await updateDoc(doc(db, 'final-inspections', savedDocId), { emailStatus: 'failed' }).catch(() => {});
+              setEmailSending(false);
+              setEmailProgress('');
+              setEmailFailed(true);
+              window.removeEventListener('beforeunload', beforeUnloadHandler);
+            }
+          }
+        }
+      })();
+      // ─── END BACKGROUND EMAIL ───
 
     } catch (error) {
       console.error('Error submitting inspection:', error);
@@ -2298,7 +2346,35 @@ export function FinalInspectionForm() {
       {success && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-center gap-3">
           <CheckCircle2 className="text-emerald-600 w-5 h-5" />
-          <span className="text-emerald-700">Inspection submitted successfully!</span>
+          <span className="text-emerald-700">Inspection saved successfully!</span>
+        </div>
+      )}
+
+      {/* Background email sending banner */}
+      {emailSending && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center gap-3">
+          <Loader2 className="text-blue-600 w-5 h-5 animate-spin" />
+          <div>
+            <span className="text-blue-700 font-medium">Email with {emailImageCount} images is being prepared...</span>
+            {emailProgress && <p className="text-blue-600 text-sm mt-0.5">{emailProgress}</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Email failed banner with retry */}
+      {emailFailed && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="text-red-600 w-5 h-5" />
+            <span className="text-red-700">Email failed after 3 attempts. Inspection was saved. You can resend from the Inspection List.</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setEmailFailed(false)}
+            className="text-red-400 hover:text-red-600"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 

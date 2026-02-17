@@ -1,9 +1,15 @@
 import { jsPDF } from 'jspdf';
 import { FinalInspection, COMPANY_NAMES, OK_NOT_OK_FIELDS } from '../types';
 
-// Max image dimension for PDF - high quality for readability
-const MAX_IMAGE_DIMENSION = 1600;
-const JPEG_QUALITY = 0.85; // 85% quality - clear and readable
+// Max image dimension for PDF - adjusts based on total photo count
+const MAX_IMAGE_DIMENSION_FULL = 1600;   // For ≤30 images: high quality
+const MAX_IMAGE_DIMENSION_THUMB = 400;   // For >30 images: thumbnail quality
+const JPEG_QUALITY_FULL = 0.85;          // 85% quality
+const JPEG_QUALITY_THUMB = 0.6;          // 60% quality for thumbnails
+
+// These get set dynamically per PDF generation
+let MAX_IMAGE_DIMENSION = MAX_IMAGE_DIMENSION_FULL;
+let JPEG_QUALITY = JPEG_QUALITY_FULL;
 
 // Convert image URL to base64 data URL with compression
 async function urlToBase64(url: string): Promise<string | null> {
@@ -183,7 +189,7 @@ async function cropToLandscape(base64: string): Promise<{ data: string; width: n
   });
 }
 
-export async function generateFinalInspectionPDF(inspection: FinalInspection): Promise<string> {
+export async function generateFinalInspectionPDF(inspection: FinalInspection, onProgress?: (msg: string) => void): Promise<string> {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -819,9 +825,19 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
   // Flatten all photos for batch loading
   const allPhotos: PhotoItem[] = photoGroups.flatMap(g => g.photos);
 
-  // Load all images in parallel (batch of 6 at a time to avoid overwhelming browser)
+  // Smart quality: use thumbnails for large inspections (30+ images)
+  if (allPhotos.length > 30) {
+    MAX_IMAGE_DIMENSION = MAX_IMAGE_DIMENSION_THUMB;
+    JPEG_QUALITY = JPEG_QUALITY_THUMB;
+  } else {
+    MAX_IMAGE_DIMENSION = MAX_IMAGE_DIMENSION_FULL;
+    JPEG_QUALITY = JPEG_QUALITY_FULL;
+  }
+
+  // Load all images in parallel (batch of 10 at a time)
   // All images are cropped to consistent 4:3 landscape aspect ratio
-  const BATCH_SIZE = 6;
+  const BATCH_SIZE = 10;
+  let loadedCount = 0;
   for (let i = 0; i < allPhotos.length; i += BATCH_SIZE) {
     const batch = allPhotos.slice(i, i + BATCH_SIZE);
     await Promise.all(batch.map(async (photo) => {
@@ -835,6 +851,8 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection): P
       } else {
         photo.base64 = null;
       }
+      loadedCount++;
+      if (onProgress) onProgress(`Processing image ${loadedCount} of ${allPhotos.length}...`);
     }));
   }
 
