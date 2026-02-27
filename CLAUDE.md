@@ -204,9 +204,16 @@ All OK/NOT OK checks:
 - **`beforeunload` guard:** Warns user if closing browser while email is sending
 - **Progress indicator:** "Processing image 15 of 47..." shown in blue banner
 - **Resend from list:** Failed emails show badge in InspectionList, existing resend button updates status
-- Image compression timeout (15s) — falls back to original file on mobile
-- Photo upload timeout (60s per photo) — prevents hanging on poor connections
-- PDF image batch size: 10 (up from 6) for faster processing
+- Image compression timeout (15s) — aggressive fallback (800px, 40% quality) if normal compression hangs on mobile
+- Photo upload timeout (60s per photo) with per-image retry (2 retries, 2s delay)
+- Photo upload batch size: 8 (up from 5) with `Promise.allSettled` so one failed image does not block the rest
+- PDF image batch size: 10 with `Promise.allSettled` so one broken image does not crash PDF generation
+- **Email payload protection:** PDF attachment stripped if >5MB, total payload capped at 6MB. Server-side also strips attachments >10MB. Email sends as HTML-only if PDF too large.
+- Background email IIFE wrapped with `.catch()` to handle unhandled rejections gracefully
+
+### Git Push Note
+- Repo `.git` is ~678MB. `git push` often fails with `mmap failed` / `pack-objects died of signal 10` due to memory constraints.
+- **Workaround:** Push files via GitHub Git Data API (create blobs → tree → commit → update ref) instead of `git push`. See commit `0bae366` for example.
 
 ### PWA (Progressive Web App)
 - **Installable** on mobile and desktop
