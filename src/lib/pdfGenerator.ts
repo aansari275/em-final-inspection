@@ -836,11 +836,13 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection, on
 
   // Load all images in parallel (batch of 10 at a time)
   // All images are cropped to consistent 4:3 landscape aspect ratio
+  // Uses allSettled to prevent one failed image from killing the entire PDF
   const BATCH_SIZE = 10;
   let loadedCount = 0;
+  let failedImages = 0;
   for (let i = 0; i < allPhotos.length; i += BATCH_SIZE) {
     const batch = allPhotos.slice(i, i + BATCH_SIZE);
-    await Promise.all(batch.map(async (photo) => {
+    const batchResults = await Promise.allSettled(batch.map(async (photo) => {
       const base64 = await urlToBase64(photo.url);
       if (base64) {
         // Crop to consistent landscape ratio
@@ -854,6 +856,18 @@ export async function generateFinalInspectionPDF(inspection: FinalInspection, on
       loadedCount++;
       if (onProgress) onProgress(`Processing image ${loadedCount} of ${allPhotos.length}...`);
     }));
+    batchResults.forEach((result, idx) => {
+      if (result.status === 'rejected') {
+        failedImages++;
+        batch[idx].base64 = null;
+        console.warn(`Failed to load image for PDF: ${batch[idx].url}`, result.reason);
+        loadedCount++;
+        if (onProgress) onProgress(`Processing image ${loadedCount} of ${allPhotos.length}... (${failedImages} failed)`);
+      }
+    });
+  }
+  if (failedImages > 0) {
+    console.warn(`${failedImages} images failed to load for PDF generation`);
   }
 
   // ─── Render photo grid: 4 columns per row ───

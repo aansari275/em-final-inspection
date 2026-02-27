@@ -33,10 +33,17 @@ exports.handler = async (event) => {
     const bodySize = event.body ? event.body.length : 0;
     console.log('Request body size:', Math.round(bodySize / 1024), 'KB');
 
-    const { to, subject, html, pdfBase64, pdfFilename } = JSON.parse(event.body);
-
+    const parsed = JSON.parse(event.body);
+    const { to, subject, html, pdfFilename } = parsed;
+    // Strip PDF attachment if too large (prevents SMTP timeout and Gmail limits)
+    let pdfBase64 = parsed.pdfBase64;
     if (pdfBase64) {
-      console.log('PDF attachment size:', Math.round(pdfBase64.length / 1024), 'KB');
+      const pdfSizeKB = Math.round(pdfBase64.length / 1024);
+      console.log('PDF attachment size:', pdfSizeKB, 'KB');
+      if (pdfBase64.length > 10 * 1024 * 1024) {
+        console.warn(`PDF attachment too large (${pdfSizeKB}KB), sending email without attachment`);
+        pdfBase64 = null;
+      }
     }
 
     // Validate recipients

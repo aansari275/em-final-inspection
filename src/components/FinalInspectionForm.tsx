@@ -58,11 +58,59 @@ const compressImage = (file: File, maxWidth = 1400, quality = 0.55): Promise<Fil
       resolve(result);
     };
 
-    // Timeout: if compression hangs on mobile, return original file after 15s
+    // Aggressive fallback compression (smaller dimensions, lower quality)
+    const aggressiveCompress = () => {
+      const img2 = new Image();
+      const url2 = URL.createObjectURL(file);
+      const fallbackTimeout = setTimeout(() => {
+        URL.revokeObjectURL(url2);
+        // Last resort: if file > 2MB, we still return it but log warning
+        if (file.size > 2 * 1024 * 1024) {
+          console.warn(`Large file (${Math.round(file.size / 1024)}KB) could not be compressed:`, file.name);
+        }
+        finish(file);
+      }, 10000);
+
+      img2.onload = () => {
+        clearTimeout(fallbackTimeout);
+        try {
+          const canvas = document.createElement('canvas');
+          const aggressiveWidth = 800;
+          const scale = Math.min(1, aggressiveWidth / img2.width);
+          canvas.width = img2.width * scale;
+          canvas.height = img2.height * scale;
+          const ctx = canvas.getContext('2d')!;
+          ctx.drawImage(img2, 0, 0, canvas.width, canvas.height);
+          canvas.toBlob(
+            (blob) => {
+              URL.revokeObjectURL(url2);
+              if (blob) {
+                finish(new File([blob], file.name, { type: 'image/jpeg' }));
+              } else {
+                finish(file);
+              }
+            },
+            'image/jpeg',
+            0.4
+          );
+        } catch {
+          URL.revokeObjectURL(url2);
+          finish(file);
+        }
+      };
+      img2.onerror = () => {
+        clearTimeout(fallbackTimeout);
+        URL.revokeObjectURL(url2);
+        finish(file);
+      };
+      img2.src = url2;
+    };
+
+    // Timeout: if compression hangs on mobile, try aggressive fallback
     setTimeout(() => {
       if (!settled) {
-        console.warn('Image compression timeout, using original:', file.name);
-        finish(file);
+        console.warn('Image compression timeout, trying aggressive fallback:', file.name);
+        aggressiveCompress();
       }
     }, 15000);
 
@@ -1535,12 +1583,25 @@ export function FinalInspectionForm() {
     setOtherPreviews(prev => prev.filter((_, i) => i !== index));
   };
 
-  const uploadPhoto = async (file: File, path: string): Promise<string> => {
+  const uploadPhoto = async (file: File, path: string, retries = 2): Promise<string> => {
     const compressed = await compressImage(file);
     const storageRef = ref(storage, path);
-    // 60s timeout per photo upload to prevent hanging on poor connections
-    await withTimeout(uploadBytes(storageRef, compressed), 60000, `Upload ${file.name}`);
-    return getDownloadURL(storageRef);
+    // Retry logic for individual photo uploads
+    for (let attempt = 1; attempt <= retries + 1; attempt++) {
+      try {
+        // 60s timeout per photo upload to prevent hanging on poor connections
+        await withTimeout(uploadBytes(storageRef, compressed), 60000, `Upload ${file.name}`);
+        return await getDownloadURL(storageRef);
+      } catch (err) {
+        if (attempt <= retries) {
+          console.warn(`Upload attempt ${attempt} failed for ${file.name}, retrying...`, err);
+          await new Promise(r => setTimeout(r, 2000)); // 2s delay between retries
+        } else {
+          throw err;
+        }
+      }
+    }
+    throw new Error(`Upload failed for ${file.name} after ${retries + 1} attempts`);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1606,16 +1667,17 @@ export function FinalInspectionForm() {
         }
       }
 
-      // Upload ALL photos in parallel batches of 5
+      // Upload ALL photos in parallel batches of 8 with per-image error recovery
       const totalPhotos = uploadTasks.length;
       setUploadProgress(totalPhotos > 0 ? `Uploading 0/${totalPhotos} photos...` : 'Saving...');
       let completed = 0;
+      let failedUploads: string[] = [];
       const results: Map<string, string> = new Map();
 
-      const BATCH_SIZE = 5;
+      const BATCH_SIZE = 8;
       for (let i = 0; i < uploadTasks.length; i += BATCH_SIZE) {
         const batch = uploadTasks.slice(i, i + BATCH_SIZE);
-        const batchResults = await Promise.all(
+        const batchResults = await Promise.allSettled(
           batch.map(async (task) => {
             const url = await uploadPhoto(task.file, task.path);
             completed++;
@@ -1623,7 +1685,21 @@ export function FinalInspectionForm() {
             return { ...task, url };
           })
         );
-        batchResults.forEach(r => results.set(r.key, r.url));
+        batchResults.forEach((result, idx) => {
+          if (result.status === 'fulfilled') {
+            results.set(result.value.key, result.value.url);
+          } else {
+            completed++;
+            failedUploads.push(batch[idx].key);
+            console.error(`Failed to upload ${batch[idx].key}:`, result.reason);
+            setUploadProgress(`Uploading ${completed}/${totalPhotos} photos... (${failedUploads.length} failed)`);
+          }
+        });
+      }
+
+      // Warn about failed uploads but don't block submission
+      if (failedUploads.length > 0) {
+        console.warn(`${failedUploads.length} photos failed to upload:`, failedUploads);
       }
 
       // Map results back to expected structures
@@ -2283,20 +2359,49 @@ export function FinalInspectionForm() {
 
         setEmailProgress('Sending email...');
         try {
-          const emailResponse = await fetch('/.netlify/functions/send-email', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+          // Check PDF size before sending - Netlify has ~6MB request body limit
+          // If PDF is too large, send email without attachment but with download link
+          let emailPdfBase64 = pdfBase64;
+          const pdfSizeBytes = pdfBase64 ? Math.round(pdfBase64.length * 0.75) : 0; // base64 → bytes
+          const MAX_PDF_SIZE = 5 * 1024 * 1024; // 5MB limit for email attachment
+
+          if (pdfSizeBytes > MAX_PDF_SIZE) {
+            console.warn(`PDF too large for email (${Math.round(pdfSizeBytes / 1024 / 1024)}MB), sending without attachment`);
+            emailPdfBase64 = null;
+            setEmailProgress('PDF too large for attachment, sending email without PDF...');
+          }
+
+          const emailPayload = JSON.stringify({
+            to: allRecipients,
+            subject: `Final Inspection: ${inspection.customerCode}${inspection.opsNo ? ` / ${inspection.opsNo}` : ''} - ${inspection.buyerDesignName} [${inspection.inspectionResult}]`,
+            html: emailHtml,
+            pdfBase64: emailPdfBase64,
+            pdfFilename: `Final_Inspection_${inspection.opsNo}_${inspection.inspectionDate}.pdf`
+          });
+
+          // Final payload size check
+          if (emailPayload.length > 6 * 1024 * 1024) {
+            console.warn(`Email payload still too large (${Math.round(emailPayload.length / 1024 / 1024)}MB), stripping attachment`);
+            const fallbackPayload = JSON.stringify({
               to: allRecipients,
               subject: `Final Inspection: ${inspection.customerCode}${inspection.opsNo ? ` / ${inspection.opsNo}` : ''} - ${inspection.buyerDesignName} [${inspection.inspectionResult}]`,
               html: emailHtml,
-              pdfBase64,
-              pdfFilename: `Final_Inspection_${inspection.opsNo}_${inspection.inspectionDate}.pdf`
-            })
-          });
-
-          if (!emailResponse.ok) {
-            throw new Error(`Email API returned ${emailResponse.status}`);
+              pdfBase64: null,
+              pdfFilename: null
+            });
+            const emailResponse = await fetch('/.netlify/functions/send-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: fallbackPayload
+            });
+            if (!emailResponse.ok) throw new Error(`Email API returned ${emailResponse.status}`);
+          } else {
+            const emailResponse = await fetch('/.netlify/functions/send-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: emailPayload
+            });
+            if (!emailResponse.ok) throw new Error(`Email API returned ${emailResponse.status}`);
           }
         } catch (emailError) {
           throw emailError; // Let retry loop handle it
@@ -2326,7 +2431,14 @@ export function FinalInspectionForm() {
             }
           }
         }
-      })();
+      })().catch((unexpectedError) => {
+        console.error('Unexpected error in background email:', unexpectedError);
+        updateDoc(doc(db, 'final-inspections', savedDocId), { emailStatus: 'failed' }).catch(() => {});
+        setEmailSending(false);
+        setEmailProgress('');
+        setEmailFailed(true);
+        window.removeEventListener('beforeunload', beforeUnloadHandler);
+      });
       // ─── END BACKGROUND EMAIL ───
 
     } catch (error) {
