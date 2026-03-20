@@ -1,11 +1,12 @@
-import { useState, Component, ErrorInfo, ReactNode } from 'react';
+import { useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Header } from './components/Header';
 import { FinalInspectionForm } from './components/FinalInspectionForm';
 import { InspectionList } from './components/InspectionList';
 import { EmailSettings } from './components/EmailSettings';
 import { PWAUpdatePrompt } from './components/PWAUpdatePrompt';
-import Login, { isAuthenticated, logout } from './components/Login';
+import Login from './components/Login';
+import { auth, logOut, onAuthStateChanged, type User } from './lib/firebase';
 
 // Error Boundary to prevent blank white screens
 interface ErrorBoundaryState {
@@ -55,20 +56,34 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
 }
 
 function App() {
-  const [authenticated, setAuthenticated] = useState(isAuthenticated());
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const handleLogin = () => {
-    setAuthenticated(true);
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      setUser(firebaseUser);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogout = async () => {
+    await logOut();
+    setUser(null);
   };
 
-  const handleLogout = () => {
-    logout();
-    setAuthenticated(false);
-  };
+  // Loading state while Firebase checks auth
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-100 flex items-center justify-center">
+        <div className="w-8 h-8 border-3 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   // Show login page if not authenticated
-  if (!authenticated) {
-    return <Login onLogin={handleLogin} />;
+  if (!user) {
+    return <Login onLogin={() => {}} />;
   }
 
   return (
