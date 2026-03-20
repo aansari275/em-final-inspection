@@ -1604,8 +1604,44 @@ export function FinalInspectionForm() {
     throw new Error(`Upload failed for ${file.name} after ${retries + 1} attempts`);
   };
 
+  // Count total photos currently captured (for display and validation)
+  const getTotalPhotoCount = () => {
+    let count = 0;
+    // Standard photos
+    for (const photoType of PHOTO_TYPES) {
+      if (photos[photoType.key as PhotoKey]) count++;
+    }
+    // Construction photos
+    for (const photoType of CONSTRUCTION_PHOTO_TYPES) {
+      if (constructionPhotos[photoType.key as ConstructionPhotoKey]) count++;
+    }
+    // Other photos
+    count += otherPhotos.length;
+    // NOT OK photos
+    count += Object.values(notOkPhotos).filter(Boolean).length;
+    // Stacked goods
+    if (stackedGoodsPhoto) count++;
+    // Consumer pieces
+    count += consumerPieces.filter(p => p.file).length;
+    // Unit load
+    if (unitLoadEnabled) count += unitLoadPhotos.filter(p => p.file).length;
+    return count;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Photo validation - warn if no photos are attached
+    const photoCount = getTotalPhotoCount();
+    if (photoCount === 0) {
+      const proceed = window.confirm(
+        'No photos have been attached to this inspection.\n\n' +
+        'Photos are required for a complete inspection report. ' +
+        'Are you sure you want to submit without any photos?'
+      );
+      if (!proceed) return;
+    }
+
     setLoading(true);
     setSuccess(false);
     setUploadProgress('Compressing images...');
@@ -1734,6 +1770,14 @@ export function FinalInspectionForm() {
       }
 
       setUploadProgress('Saving inspection...');
+
+      // Log photo upload results for debugging
+      const uploadedPhotoCount = results.size;
+      const totalTasks = uploadTasks.length;
+      console.log(`[Final Inspection] Photo upload complete: ${uploadedPhotoCount}/${totalTasks} uploaded, ${failedUploads.length} failed`);
+      if (failedUploads.length > 0) {
+        console.warn('[Final Inspection] Failed uploads:', failedUploads);
+      }
 
       const inspection: FinalInspection = {
         // Company & Document
@@ -3941,6 +3985,16 @@ export function FinalInspectionForm() {
               <span className="text-emerald-600 font-medium ml-2">Saved!</span>
             )}
           </div>
+          {/* Photo count indicator */}
+          {(() => {
+            const count = getTotalPhotoCount();
+            return (
+              <div className={`flex items-center gap-2 text-sm font-medium ${count === 0 ? 'text-red-500' : 'text-emerald-600'}`}>
+                <Camera className="w-4 h-4" />
+                {count === 0 ? 'No photos attached' : `${count} photo${count !== 1 ? 's' : ''} attached`}
+              </div>
+            );
+          })()}
           <div className="flex gap-3 w-full sm:w-auto">
             <button
               type="button"
