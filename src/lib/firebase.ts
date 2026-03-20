@@ -15,6 +15,7 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { getStorage, ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User } from 'firebase/auth';
 import type { Customer } from '../types';
 
 // OPS Order Item interface
@@ -60,6 +61,13 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+export const auth = getAuth(app);
+export const googleProvider = new GoogleAuthProvider();
+
+// Google OAuth helpers
+export const signInWithGoogle = () => signInWithPopup(auth, googleProvider);
+export const logOut = () => signOut(auth);
+export { onAuthStateChanged, type User };
 
 // ============================================
 // Customer/Buyer Operations
