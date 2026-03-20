@@ -49,7 +49,7 @@ export interface OpsOrder {
 
 // Firebase configuration for easternmillscom project
 const firebaseConfig = {
-  apiKey: 'AIzaSyDqFKIL0SdH0pR0rVYKRTlO8snL0jTK4cA',
+  apiKey: 'AIzaSyBSnzCBh-nhQs2nNuPpV_xpRp29FyUyHuc',
   authDomain: 'easternmillscom.firebaseapp.com',
   projectId: 'easternmillscom',
   storageBucket: 'easternmillscom.firebasestorage.app',
