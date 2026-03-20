@@ -287,8 +287,15 @@ When inspection is submitted:
 | D14 | Moisture Issue |
 | D15 | Other |
 
+## Photo Validation (Mar 2026)
+- **Submit warning:** If inspector submits with 0 photos, a confirmation dialog warns them
+- **Photo counter:** Live count near submit button shows how many photos are attached (red if 0, green otherwise)
+- **Console logging:** Photo upload results logged for debugging (`[Final Inspection] Photo upload complete: X/Y uploaded, Z failed`)
+- **Root cause of missing photos (Feb-Mar 2026):** Inspector Arjun was submitting without taking photos. Code was working correctly. Photos from other inspectors (Shivam Dubey) had 10-24 images per report.
+- **Netlify secrets scan:** Firebase API key (`AIza...`) must be added to `SECRETS_SCAN_SMART_DETECTION_OMIT_VALUES` env var to prevent build failures (Firebase API keys are public, not secrets)
+
 ## QC Inspectors
-- Mahfooz Khan, Faizan, Gulab (+ custom)
+- Mahfooz Khan, Faizan, Gulab, Arjun, Shivam Dubey (+ custom)
 
 ## Merchants
 - Haider, Jozey, Shagun, Shahbaz, Sumant, Zahid (+ custom)
