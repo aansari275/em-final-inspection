@@ -287,6 +287,15 @@ When inspection is submitted:
 | D14 | Moisture Issue |
 | D15 | Other |
 
+## Authentication (Mar 2026)
+- **Google OAuth** via Firebase Auth (replaced password123 login)
+- Firebase Auth SDK imported in `firebase.ts`, Google provider configured
+- `onAuthStateChanged` manages session state in `App.tsx`
+- Login screen shows "Sign in with Google" button
+- Sign Out button in header
+- No domain restriction (any Google account can sign in)
+- Firebase API key: `AIzaSyBSnzCBh-nhQs2nNuPpV_xpRp29FyUyHuc` (easternmillscom project)
+
 ## Photo Validation (Mar 2026)
 - **Submit warning:** If inspector submits with 0 photos, a confirmation dialog warns them
 - **Photo counter:** Live count near submit button shows how many photos are attached (red if 0, green otherwise)
