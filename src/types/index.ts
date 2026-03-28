@@ -134,6 +134,7 @@ export const OK_NOT_OK_FIELDS = [
   { key: 'barcodeScan', label: 'Barcode Scan' },
 ] as const;
 
+// ─── V1 Interface (backward compat, existing inspections) ───
 export interface FinalInspection {
   // Company & Document
   company: Company;
@@ -274,6 +275,264 @@ export interface FinalInspection {
 
   createdAt: string;
 }
+
+// ─── V2: Per-Size Inspection (Firestore document for saved size data) ───
+export interface SizeInspection {
+  id: string; // crypto.randomUUID()
+  size: string;
+  sizeUnit: SizeUnit;
+
+  // Product Quality Checks
+  approvedSampleAvailable: YesNo;
+  materialFibreContent: string;
+  motifDesignCheck: OkNotOk;
+  tuftDensity: string;
+  backing: OkNotOk;
+  backingNotes: string;
+  bindingAndEdges: OkNotOk;
+  handFeel: OkNotOk;
+  pileHeight: string;
+  embossingCarving: OkNotOk;
+  workmanship: OkNotOk;
+  productQualityWeight: OkNotOk;
+  productWeight: string;
+  sizeTolerance: string;
+  finishingPercent: string;
+  packedPercent: string;
+
+  // Labeling & Marking
+  labelPlacement: OkNotOk;
+  sideMarking: OkNotOk;
+  outerMarking: OkNotOk;
+  innerPack: OkNotOk;
+  careLabels: OkNotOk;
+  skuStickers: OkNotOk;
+  upcBarcodes: OkNotOk;
+
+  // Packaging
+  cartonPly: string;
+  cartonDropTest: OkNotOk;
+  packingType: PackingType;
+  grossWeight: string;
+  netWeight: string;
+  cartonBaleNumbering: OkNotOk;
+  pcsPerCartonBale: string;
+  pcsPerPolybag: string;
+  cartonMeasurementL: string;
+  cartonMeasurementW: string;
+  cartonMeasurementH: string;
+  cartonDimension: OkNotOk;
+  productLabel: OkNotOk;
+  cartonLabel: OkNotOk;
+  barcodeScan: OkNotOk;
+
+  // Defect Tracking
+  dpciSkuStyleNumber: string;
+  styleDescription: string;
+  defects: Defect[];
+
+  // Photo URLs (populated after upload)
+  standardPhotoUrls: Record<string, string>;
+  constructionPhotoUrls: Record<string, string>;
+  otherPhotoUrls: string[];
+  stackedGoodsPhotoUrl: string;
+  consumerPieces: Array<{ label: string; url: string }>;
+  unitLoadEnabled: boolean;
+  unitLoadPhotos: Array<{ label: string; url: string }>;
+  notOkPhotos: NotOkPhoto[];
+
+  // Result
+  qcInspectorRemarks: string;
+  inspectionResult: 'PASS' | 'FAIL';
+}
+
+// ─── V2: Form state for a size during editing (has File objects) ───
+export interface SizeInspectionFormState extends Omit<SizeInspection,
+  'standardPhotoUrls' | 'constructionPhotoUrls' | 'otherPhotoUrls' |
+  'stackedGoodsPhotoUrl' | 'consumerPieces' | 'unitLoadPhotos' | 'notOkPhotos'
+> {
+  // File objects during editing
+  standardPhotos: Record<string, File | null>;
+  standardPhotoPreviews: Record<string, string>;
+  constructionPhotos: Record<string, File | null>;
+  constructionPhotoPreviews: Record<string, string>;
+  otherPhotos: File[];
+  otherPhotoPreviews: string[];
+  stackedGoodsPhoto: File | null;
+  stackedGoodsPreview: string;
+  consumerPiecesForm: LabeledPhoto[];
+  unitLoadPhotosForm: LabeledPhoto[];
+  notOkPhotosForm: Record<string, File | null>;
+  notOkPreviews: Record<string, string>;
+}
+
+// ─── V2: Firestore document structure ───
+export interface FinalInspectionV2 {
+  version: 2;
+
+  // Global fields
+  company: Company;
+  documentNo: string;
+  inspectionDate: string;
+  qcInspectorName: string;
+  customerName: string;
+  customerCode: string;
+  customerPoNo: string;
+  opsNo: string;
+  opsNumber?: string;
+  buyerDesignName: string;
+  emplDesignNo: string;
+  colorName: string;
+  merchant: string;
+  totalOrderQty: number;
+
+  // AQL (global)
+  inspectedLotQty: number;
+  aql: string;
+  sampleSize: number;
+  acceptedQty: number;
+  rejectedQty: number;
+  inspectionLevel?: 'I' | 'II' | 'III';
+  codeLetter?: string;
+  calculatedSampleSize?: number;
+  acceptNumber?: number;
+  rejectNumber?: number;
+  effectiveCodeLetter?: string;
+  isAutoResult?: boolean;
+  resultOverridden?: boolean;
+
+  // Inspected articles from OPS
+  inspectedArticles?: Array<{
+    articleName: string;
+    size?: string;
+    color?: string;
+    quality?: string;
+    pcs: number;
+    sqm: number;
+    inspectedQty: number;
+  }>;
+
+  // Per-size inspections
+  sizeInspections: SizeInspection[];
+
+  // Rollup fields (computed on save)
+  productSizes: string;
+  sizeUnit: SizeUnit;
+  inspectionResult: 'PASS' | 'FAIL'; // FAIL if any size fails
+
+  // Upload tracking
+  photoUploadStatus: 'pending' | 'uploading' | 'complete' | 'partial';
+  totalPhotoCount: number;
+  uploadedPhotoCount: number;
+
+  emailStatus: 'pending' | 'sending' | 'sent' | 'failed';
+  createdAt: string;
+}
+
+// Type guard for V2 documents
+export function isV2Inspection(doc: FinalInspection | FinalInspectionV2): doc is FinalInspectionV2 {
+  return 'version' in doc && doc.version === 2 || 'sizeInspections' in doc && Array.isArray((doc as FinalInspectionV2).sizeInspections);
+}
+
+// Helper to create empty photo records
+function emptyStandardPhotos(): Record<string, null> {
+  const result: Record<string, null> = {};
+  for (const pt of PHOTO_TYPES) result[pt.key] = null;
+  return result;
+}
+
+function emptyStandardPreviews(): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const pt of PHOTO_TYPES) result[pt.key] = '';
+  return result;
+}
+
+function emptyConstructionPhotos(): Record<string, null> {
+  const result: Record<string, null> = {};
+  for (const pt of CONSTRUCTION_PHOTO_TYPES) result[pt.key] = null;
+  return result;
+}
+
+function emptyConstructionPreviews(): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const pt of CONSTRUCTION_PHOTO_TYPES) result[pt.key] = '';
+  return result;
+}
+
+// Create an empty size inspection form state
+export function createEmptySizeInspection(): SizeInspectionFormState {
+  return {
+    id: crypto.randomUUID(),
+    size: '',
+    sizeUnit: 'cm',
+    // Quality checks
+    approvedSampleAvailable: 'No',
+    materialFibreContent: '',
+    motifDesignCheck: 'NA',
+    tuftDensity: '',
+    backing: 'NA',
+    backingNotes: '',
+    bindingAndEdges: 'NA',
+    handFeel: 'NA',
+    pileHeight: '',
+    embossingCarving: 'NA',
+    workmanship: 'NA',
+    productQualityWeight: 'NA',
+    productWeight: '',
+    sizeTolerance: '',
+    finishingPercent: '',
+    packedPercent: '',
+    // Labeling
+    labelPlacement: 'NA',
+    sideMarking: 'NA',
+    outerMarking: 'NA',
+    innerPack: 'NA',
+    careLabels: 'NA',
+    skuStickers: 'NA',
+    upcBarcodes: 'NA',
+    // Packaging
+    cartonPly: '',
+    cartonDropTest: 'NA',
+    packingType: 'Assorted',
+    grossWeight: '',
+    netWeight: '',
+    cartonBaleNumbering: 'NA',
+    pcsPerCartonBale: '',
+    pcsPerPolybag: '',
+    cartonMeasurementL: '',
+    cartonMeasurementW: '',
+    cartonMeasurementH: '',
+    cartonDimension: 'NA',
+    productLabel: 'NA',
+    cartonLabel: 'NA',
+    barcodeScan: 'NA',
+    // Defects
+    dpciSkuStyleNumber: '',
+    styleDescription: '',
+    defects: [],
+    // Photos (File objects during editing)
+    standardPhotos: emptyStandardPhotos() as Record<string, File | null>,
+    standardPhotoPreviews: emptyStandardPreviews(),
+    constructionPhotos: emptyConstructionPhotos() as Record<string, File | null>,
+    constructionPhotoPreviews: emptyConstructionPreviews(),
+    otherPhotos: [],
+    otherPhotoPreviews: [],
+    stackedGoodsPhoto: null,
+    stackedGoodsPreview: '',
+    consumerPiecesForm: [],
+    unitLoadEnabled: false,
+    unitLoadPhotosForm: [],
+    notOkPhotosForm: {},
+    notOkPreviews: {},
+    // Result
+    qcInspectorRemarks: '',
+    inspectionResult: 'PASS',
+  };
+}
+
+// Photo key types
+export type PhotoKey = typeof PHOTO_TYPES[number]['key'];
+export type ConstructionPhotoKey = typeof CONSTRUCTION_PHOTO_TYPES[number]['key'];
 
 export const COMPANIES: Company[] = ['EHI', 'EMPL'];
 
