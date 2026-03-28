@@ -30,108 +30,36 @@ Final Inspection QC form application for Eastern Home Industries (EHI) and Easte
 
 ---
 
-## Form Sections
+## Form Architecture (V2 — Per-Size Inspections, Mar 2026)
 
-### 1. Company & Document Selection
-- **Company Dropdown:** EHI or EMPL
-- **Document Number:** Auto-generated (EHI/IP/01 or EMPL/IP/01)
+### Global Sections (filled once)
+1. **Company Selection** — EHI or EMPL, auto-sets document number
+2. **OPS Lookup** — Searchable dropdown, auto-fills customer/PO/merchant/design/qty
+3. **Article Selection** — Checkboxes from OPS articles, inspected qty per article
+4. **Inspection Details** — Date, QC Inspector
+5. **Order Information** — Customer name/code, PO, merchant, design, color
+6. **AQL Sampling** (global) — Lot qty, AQL level, sample size, accepted/rejected, auto PASS/FAIL
 
-### 2. OPS Lookup & Article Selection (NEW)
-Main entry point for the form:
-- **OPS Number:** Searchable dropdown with all OPS orders
-- **Auto-fills on OPS selection:**
-  - Customer Name & Code (read-only)
-  - Customer PO (editable)
-  - Merchant
-  - EMPL Design No. (from first article)
-  - Total Order Qty
-- **Article Selection:**
-  - Shows all articles from selected OPS
-  - Checkbox to select/deselect articles
-  - Inspected Qty input per article
-  - Selection summary with totals
-- **Additional Details:**
-  - EMPL Design No. (auto-filled, editable)
-  - Color Name
-  - Product Sizes (cm/feet toggle, clickable chips)
-  - Merchant (dropdown with add)
+### Per-Size Sections (accordion, one per size)
+Each size gets its own complete inspection panel in an accordion UI:
+- **Size Selector** — cm/feet toggle, standard size chips, custom sizes
+- **Quality Checks** — 20 OK/NOT OK/NA fields with photo evidence per row
+- **Measurement Details** — Tuft density, pile height, weight, tolerance, finishing %, packed %
+- **Labeling & Marking** — Label placement, side/outer marking, inner pack, care labels, SKU, UPC
+- **Packaging** — Carton ply, drop test, packing type, weights, dimensions, pcs per carton
+- **Defect Tracking** — DPCI/SKU/Style, defects table (code, major, minor, description)
+- **Photos** — Stacked goods, consumer pieces, unit load, 12 standard photos, 5 construction photos, other photos
+- **Result** — QC remarks + PASS/FAIL per size
 
-### 3. Inspection Details
-- Inspection Date
-- QC Inspector Name (dropdown with add)
+### Accordion UI
+- One size expanded at a time
+- Collapsed header shows: size name, PASS/FAIL badge, photo count, defect count
+- "Add One More Size" button at bottom (prominent green)
+- Each new size starts blank
 
-### 4. Order Information
-- Customer Name & Code (auto-filled from OPS or manual)
-- Customer PO No. (editable)
-
-### 5. Images Section (NEW)
-- **Stacked Images of Packed Goods** - Single photo upload
-- **Packed Consumer Pieces** - Multiple photos with labeled dropdowns:
-  - Consumer Label, Care Label, SKU Sticker, UPC Barcode, Packaging Front/Back
-  - Custom labels can be added
-- **Unit Load** - Toggle checkbox, when enabled:
-  - Multiple photos with labeled dropdowns
-  - Unit Load Label, Pallet Marking, Outer Carton, Stretch Wrap
-  - Custom labels can be added
-
-### 6. Quantities & Sampling (AQL Z1.4-2008)
-- Total Order Qty, Inspected Lot Qty
-- AQL Level: Fixed at 2.5 (company standard for final inspections)
-- **AQL Auto-Calculation Panel:**
-  - Code Letter (auto-calculated from lot size)
-  - Sample Size (auto-filled from Z1.4 table)
-  - Accept/Reject thresholds
-  - Arrow handling when sample size changes
-- Sample Size (editable), Accepted Qty, Rejected Qty
-- **Auto PASS/FAIL determination** based on rejected qty vs reject threshold
-- Inspector override capability for auto-determined results
-
-### 7. Product Quality Checks
-- Approved Sample Available (Yes/No)
-- Material/Fibre Content (dropdown)
-- **List-view layout** with pill-style OK/NOT OK/NA buttons + camera icon on every row
-- All quality checks (including Labeling, Packaging, Additional) rendered as list rows
-- Photo upload available on ALL checks (not just NOT OK)
-- Checks: Motif/Design, Backing (with notes), Binding & Edges, Hand Feel, Embossing/Carving, Workmanship, Product Quality Weight
-- Text fields: Tuft Density, Pile Height, Product Weight, Size Tolerance, Finishing %, Packed %
-
-### 8. Labeling & Marking
-All OK/NOT OK checks:
-- Label Placement, Side Marking, Outer Marking, Inner Pack
-- Care Labels, SKU Stickers, UPC Barcodes
-
-### 9. Packaging
-- Carton Ply, Carton Drop Test (OK/NOT OK)
-- Packing Type (Assorted/Solid)
-- Gross Weight, Net Weight
-- Carton/Bale Numbering (OK/NOT OK)
-- Pcs per Carton/Bale, Pcs per Polybag
-- Carton Measurements (L × W × H)
-
-### 10. Defect Tracking
-- DPCI/SKU/Style Number, Style Description
-- Defects table: Code, Major Count, Minor Count, Description
-
-### 11. Photo Documentation
-**Standard Photos:**
-- Approved Sample Photo, ID Photo
-
-**Red Seal Photos (5 types):**
-- Red Seal - Front
-- Red Seal - Back
-- Close-up with Red Seal
-- Front Photo with Red Seal
-- Back Photo with Red Seal
-
-**Other Photos:**
-- Label Photo, Moisture Photo
-- Size Front Photo, Size Side Photo
-- Inspected Samples Photo, Metal Checking Photo
-- Other Photos (multiple)
-
-### 12. Results
-- QC Inspector Remarks (text area)
-- Inspection Result (PASS/FAIL)
+### Overall Result
+- FAIL if ANY size fails, PASS if all pass
+- Shown below the size accordion as "Final Result"
 
 ---
 
@@ -191,6 +119,25 @@ All OK/NOT OK checks:
 - "Cloud Drafts" panel to browse, resume, and delete saved drafts
 - Draft restoration on page load (local first, cloud as fallback)
 - On successful submission, cloud draft is automatically deleted
+
+### V2 Document Format (Per-Size, Mar 2026)
+- **Version detection:** `isV2Inspection()` checks `version === 2` or `sizeInspections` array exists
+- **Global fields:** company, documentNo, date, inspector, customer, OPS, design, color, merchant, AQL
+- **Per-size:** `sizeInspections: SizeInspection[]` — each has quality checks, packaging, defects, photos, result
+- **Rollup:** `productSizes` (joined), `inspectionResult` (FAIL if any size fails)
+- **Upload tracking:** `photoUploadStatus`, `totalPhotoCount`, `uploadedPhotoCount`
+- **Backward compat:** V1 documents render and resend without changes
+- **State management:** React Context + useReducer replaces ~40 useState hooks
+- **Component decomposition:** Monolith split into 15+ focused components
+
+### Save-First Photo Upload (Mar 2026)
+- Firestore document saved IMMEDIATELY with all text data + empty photo URLs
+- Photos upload in background after form resets (user sees instant success)
+- Storage path: `final-inspection-images/{docId}/{sizeId}/{photoType}_{filename}`
+- Batch size: 8 photos at a time with `Promise.allSettled`
+- Firestore updated per-size as uploads complete
+- Handles 200-500+ images across many sizes
+- Email generated only after all uploads complete
 
 ### Submit Reliability (Redesigned Feb 2026)
 **Problem:** Image-heavy inspections (20+ photos) failed because PDF generation re-downloaded all images within a 90s timeout.
@@ -314,19 +261,36 @@ When inspection is submitted:
 ## Key Files
 ```
 src/
+├── context/
+│   └── InspectionFormContext.tsx # React Context + useReducer (replaces 40 useState hooks)
 ├── components/
-│   ├── FinalInspectionForm.tsx  # Main form (~3000 lines)
-│   ├── InspectionList.tsx       # History view
+│   ├── FinalInspectionForm.tsx  # Orchestrator (~2200 lines, delegates to sub-components)
+│   ├── SizeInspectionList.tsx   # Accordion container + "Add One More Size" button
+│   ├── SizeInspectionPanel.tsx  # One size's complete inspection (accordion item)
+│   ├── SizeSelector.tsx         # cm/feet toggle + size chips for one size
+│   ├── QualityChecksSection.tsx # 20 OK/NOT OK/NA fields with photo evidence
+│   ├── PackagingSection.tsx     # Carton/packaging fields per size
+│   ├── DefectsSection.tsx       # Defect tracking table per size
+│   ├── PhotosSection.tsx        # All photo categories per size
+│   ├── ResultSection.tsx        # Remarks + PASS/FAIL per size
+│   ├── shared/
+│   │   ├── PhotoInputButtons.tsx   # Camera popover (Take Photo / Gallery)
+│   │   ├── NotOkPhotoUpload.tsx    # Inline photo for quality check rows
+│   │   └── DropdownWithAdd.tsx     # Select dropdown with "Add new" option
+│   ├── InspectionList.tsx       # History view (handles V1 + V2 documents)
 │   ├── Header.tsx               # Navigation
 │   └── EmailSettings.tsx        # Email config
 ├── lib/
 │   ├── firebase.ts              # Firebase config + OPS lookup
-│   ├── pdfGenerator.ts          # PDF generation with AQL details
+│   ├── pdfGenerator.ts          # PDF generation (V1 flat + V2 per-size)
+│   ├── photoUploader.ts         # Background photo upload (save-first pattern)
+│   ├── imageUtils.ts            # Image compression + timeout helpers
 │   ├── emailSettingsService.ts  # Email settings
+│   ├── draftPersistence.ts      # localStorage + IndexedDB drafts
 │   ├── aqlTables.ts             # Z1.4-2008 lookup tables
 │   └── aqlCalculator.ts         # AQL calculation utilities
 └── types/
-    └── index.ts                 # TypeScript types & constants
+    └── index.ts                 # TypeScript types (V1, V2, SizeInspection, helpers)
 ```
 
 ## Local Development
