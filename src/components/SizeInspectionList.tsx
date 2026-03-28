@@ -54,9 +54,9 @@ export default function SizeInspectionList({
       <button
         type="button"
         onClick={handleAdd}
-        className="w-full flex items-center justify-center gap-2 px-4 py-4 border-2 border-dashed border-emerald-300 rounded-lg text-emerald-600 font-medium hover:bg-emerald-50 hover:border-emerald-400 transition-colors"
+        className="w-full flex items-center justify-center gap-3 px-6 py-5 bg-emerald-50 border-2 border-dashed border-emerald-400 rounded-xl text-emerald-700 font-semibold text-lg hover:bg-emerald-100 hover:border-emerald-500 active:bg-emerald-200 transition-all shadow-sm"
       >
-        <Plus className="w-5 h-5" />
+        <Plus className="w-6 h-6 stroke-[2.5]" />
         Add One More Size
       </button>
     </div>
