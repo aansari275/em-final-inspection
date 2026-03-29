@@ -1402,9 +1402,20 @@ async function generateV2PDF(inspection: FinalInspectionV2, onProgress?: (msg: s
   for (let sIdx = 0; sIdx < inspection.sizeInspections.length; sIdx++) {
     const size = inspection.sizeInspections[sIdx];
 
-    // Each size starts on a new page
-    doc.addPage();
-    y = 10;
+    // Continue on same page if room, otherwise new page (avoid wasting space)
+    if (sIdx === 0) {
+      // First size: add spacing after AQL section
+      y += 4;
+      checkNewPage(30);
+    } else {
+      // Subsequent sizes: add a visible divider line
+      y += 6;
+      checkNewPage(30);
+      doc.setDrawColor(200, 200, 200);
+      doc.setLineWidth(0.5);
+      doc.line(M, y, M + TW, y);
+      y += 6;
+    }
 
     // ─── Size Header Bar ───
     const sizeResultBg: [number, number, number] = size.inspectionResult === 'PASS' ? successGreen : errorRed;
