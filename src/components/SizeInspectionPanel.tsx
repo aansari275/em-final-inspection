@@ -23,6 +23,10 @@ interface SizeInspectionPanelProps {
   onToggle: () => void;
   onRemove: () => void;
   dispatch: (action: any) => void;
+  // V3 mode: hide the panel's own size header + size selector chips
+  // (V3 supplies size tabs at the parent level and pulls size labels from OPS data)
+  hideAccordionHeader?: boolean;
+  hideSizeSelector?: boolean;
 }
 
 // Count all photos for a size entry
@@ -71,6 +75,8 @@ const SizeInspectionPanel = React.memo(function SizeInspectionPanel({
   onToggle,
   onRemove,
   dispatch,
+  hideAccordionHeader = false,
+  hideSizeSelector = false,
 }: SizeInspectionPanelProps) {
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -291,8 +297,9 @@ const SizeInspectionPanel = React.memo(function SizeInspectionPanel({
   const defectCount = useMemo(() => countDefects(sizeData), [sizeData]);
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-      {/* Collapsed header */}
+    <div className={hideAccordionHeader ? '' : 'bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden'}>
+      {/* Collapsed header — hidden in V3 (tabs handle activation) */}
+      {!hideAccordionHeader && (
       <button
         type="button"
         onClick={onToggle}
@@ -355,23 +362,35 @@ const SizeInspectionPanel = React.memo(function SizeInspectionPanel({
           </button>
         )}
       </button>
+      )}
 
-      {/* Expandable content with smooth animation */}
+      {/* Expandable content. V2: collapsible grid animation. V3: parent tabs control visibility — always visible, no animation wrapper. */}
       <div
-        className="grid transition-all duration-300 ease-in-out"
-        style={{
-          gridTemplateRows: isActive ? '1fr' : '0fr',
-        }}
+        className={hideAccordionHeader ? '' : 'grid transition-all duration-300 ease-in-out'}
+        style={
+          hideAccordionHeader
+            ? undefined
+            : { gridTemplateRows: isActive ? '1fr' : '0fr' }
+        }
       >
-        <div className="overflow-hidden">
-          <div ref={contentRef} className="px-4 pb-4 space-y-6 border-t border-gray-100 pt-4">
-            {/* Size Selector */}
+        <div className={hideAccordionHeader ? '' : 'overflow-hidden'}>
+          <div
+            ref={contentRef}
+            className={
+              hideAccordionHeader
+                ? 'px-4 pb-4 space-y-6 pt-4 bg-white'
+                : 'px-4 pb-4 space-y-6 border-t border-gray-100 pt-4'
+            }
+          >
+            {/* Size Selector — hidden in V3 (sizes come from OPS, tabs at parent level) */}
+            {!hideSizeSelector && (
             <SizeSelector
               size={sizeData.size}
               sizeUnit={sizeData.sizeUnit}
               onSizeChange={onSizeChange}
               onUnitChange={onUnitChange}
             />
+            )}
 
             {/* Quality Checks */}
             <div>

@@ -94,6 +94,8 @@ function SizePanel({ articleId, colorId, sizeData, sizeIndex, totalSizes }: Size
         /* V3 does not allow removing sizes; they come from the OPS */
       }}
       dispatch={compatDispatch}
+      hideAccordionHeader
+      hideSizeSelector
     />
   );
 }
