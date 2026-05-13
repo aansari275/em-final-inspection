@@ -30,6 +30,20 @@ Final Inspection QC form application for Eastern Home Industries (EHI) and Easte
 
 ---
 
+## Planned V3 — Per-Article × Color × Size Hierarchy (Design 2026-05-13)
+
+V2 ships flat per-size accordions per OPS. **V3 replaces V2** with a three-level hierarchy:
+**Article → Color → Size (tabs)**, with per-article AQL, per-article PDF/email submission, and an on-demand combined OPS roll-up.
+
+- Design spec: [`docs/superpowers/specs/2026-05-13-per-article-color-size-hierarchy-design.md`](docs/superpowers/specs/2026-05-13-per-article-color-size-hierarchy-design.md)
+- Status: **design approved, implementation pending** (writing-plans skill next)
+- Hard cutover, no toggle. V1/V2 records remain readable via existing PDF paths.
+- New write format: `version: 3` on `final-inspections` documents. Shape: `articles[] → colors[] → sizes[]`, where each `SizeInspection` is identical to V2.
+- Submit-Article warning fires only when `inspectionResult` (PASS/FAIL) is missing on a size — never hard-blocks.
+- Submit-OPS-Summary button enabled once every article has been submitted at least once.
+
+---
+
 ## Form Architecture (V2 — Per-Size Inspections, Mar 2026)
 
 ### Global Sections (filled once)
