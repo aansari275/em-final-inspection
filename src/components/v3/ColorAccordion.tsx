@@ -3,6 +3,7 @@ import type { ArticleInspectionV3, ColorInspectionV3 } from '../../types';
 import { useInspectionFormV3, useV2CompatDispatch } from '../../context/InspectionFormContextV3';
 import SizeTabBar from './SizeTabBar';
 import SizeInspectionPanel from '../SizeInspectionPanel';
+import SaveStatusIndicator from './SaveStatusIndicator';
 
 interface Props {
   article: ArticleInspectionV3;
@@ -55,13 +56,18 @@ function ColorBody({ article, color }: { article: ArticleInspectionV3; color: Co
     <div className="bg-white">
       <SizeTabBar color={color} />
       {activeSize ? (
-        <SizePanel
-          articleId={article.id}
-          colorId={color.id}
-          sizeData={activeSize}
-          sizeIndex={0}
-          totalSizes={color.sizes.length}
-        />
+        <>
+          <div className="px-4 pt-3 -mb-1 flex justify-end">
+            <SaveStatusIndicator />
+          </div>
+          <SizePanel
+            articleId={article.id}
+            colorId={color.id}
+            sizeData={activeSize}
+            sizeIndex={0}
+            totalSizes={color.sizes.length}
+          />
+        </>
       ) : (
         <div className="p-4 text-sm text-gray-500 italic">Select a size tab to inspect.</div>
       )}

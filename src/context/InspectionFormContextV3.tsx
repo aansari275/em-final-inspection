@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useCallback, useMemo, type ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import {
   type ArticleInspectionV3,
   type ArticleAql,
@@ -24,6 +24,13 @@ export interface GlobalFormDataV3 {
   totalOrderQty: string;
 }
 
+export interface SaveStatusV3 {
+  lastTouchedAt: number;  // ms timestamp of last data edit (0 = clean)
+  lastSavedAt: number;    // ms timestamp of last successful save
+  saving: boolean;        // mid-save flag
+  error: string | null;   // last save error
+}
+
 export interface InspectionFormStateV3 {
   global: GlobalFormDataV3;
   articles: ArticleInspectionV3[];
@@ -33,6 +40,7 @@ export interface InspectionFormStateV3 {
   headerExpanded: boolean;
   loading: boolean;
   submitInFlight: Record<string, boolean>;
+  saveStatus: SaveStatusV3;
 }
 
 function todayISO(): string {
@@ -56,6 +64,7 @@ export function createInitialStateV3(): InspectionFormStateV3 {
       totalOrderQty: '',
     },
     articles: [],
+    saveStatus: { lastTouchedAt: 0, lastSavedAt: 0, saving: false, error: null },
     activeArticleId: null,
     activeColorIdByArticle: {},
     activeSizeIdByColor: {},
@@ -170,7 +179,31 @@ type ActionV3 =
   | { type: 'SET_ARTICLE_SUBMIT_IN_FLIGHT'; articleId: string; inFlight: boolean }
   | { type: 'TOGGLE_HEADER' }
   | { type: 'SET_LOADING'; loading: boolean }
+  | { type: 'MARK_SAVING' }
+  | { type: 'MARK_SAVED'; at: number }
+  | { type: 'MARK_SAVE_ERROR'; error: string }
   | { type: 'RESET' };
+
+// Action types that modify form data and should bump lastTouchedAt.
+const DATA_CHANGING_ACTIONS = new Set<ActionV3['type']>([
+  'SET_GLOBAL',
+  'SET_GLOBAL_BULK',
+  'INIT_FROM_OPS_DATA',
+  'UPDATE_SIZE_FIELD',
+  'UPDATE_SIZE_PATCH',
+  'SET_SIZE_DEFECTS',
+  'SET_SIZE_PHOTO',
+  'ADD_OTHER_PHOTO',
+  'REMOVE_OTHER_PHOTO',
+  'ADD_CONSUMER_PIECE',
+  'UPDATE_CONSUMER_PIECE',
+  'REMOVE_CONSUMER_PIECE',
+  'ADD_UNIT_LOAD_PHOTO',
+  'UPDATE_UNIT_LOAD_PHOTO',
+  'REMOVE_UNIT_LOAD_PHOTO',
+  'UPDATE_ARTICLE_AQL',
+  'MARK_ARTICLE_SUBMITTED',
+]);
 
 // ─── Reducer helpers ───
 function mapSize(
@@ -198,8 +231,19 @@ function mapSize(
   };
 }
 
-// ─── Reducer ───
+// ─── Reducer (outer wraps inner to bump lastTouchedAt on data changes) ───
 function reducerV3(state: InspectionFormStateV3, action: ActionV3): InspectionFormStateV3 {
+  const next = innerReducerV3(state, action);
+  if (DATA_CHANGING_ACTIONS.has(action.type) && next !== state) {
+    return {
+      ...next,
+      saveStatus: { ...next.saveStatus, lastTouchedAt: Date.now(), error: null },
+    };
+  }
+  return next;
+}
+
+function innerReducerV3(state: InspectionFormStateV3, action: ActionV3): InspectionFormStateV3 {
   switch (action.type) {
     case 'SET_GLOBAL':
       return { ...state, global: { ...state.global, [action.field]: action.value } };
@@ -391,6 +435,26 @@ function reducerV3(state: InspectionFormStateV3, action: ActionV3): InspectionFo
     case 'SET_LOADING':
       return { ...state, loading: action.loading };
 
+    case 'MARK_SAVING':
+      return { ...state, saveStatus: { ...state.saveStatus, saving: true, error: null } };
+
+    case 'MARK_SAVED':
+      return {
+        ...state,
+        saveStatus: {
+          ...state.saveStatus,
+          saving: false,
+          lastSavedAt: action.at,
+          error: null,
+        },
+      };
+
+    case 'MARK_SAVE_ERROR':
+      return {
+        ...state,
+        saveStatus: { ...state.saveStatus, saving: false, error: action.error },
+      };
+
     case 'RESET':
       return createInitialStateV3();
 
@@ -407,10 +471,67 @@ interface CtxV3 {
 
 const Ctx = createContext<CtxV3 | null>(null);
 
+const V3_DRAFT_KEY = 'final_inspection_v3_draft';
+const AUTOSAVE_DEBOUNCE_MS = 800;
+
 export function InspectionFormProviderV3({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducerV3, undefined, createInitialStateV3);
+  useAutoSaveV3(state, dispatch);
   const value = useMemo(() => ({ state, dispatch }), [state]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+// Debounced autosave: every time lastTouchedAt changes (= data was edited),
+// schedule a save 800ms later. Writes a JSON-safe slice of state to localStorage
+// (Files / Blob objects are stripped; previews and field values are preserved).
+function useAutoSaveV3(state: InspectionFormStateV3, dispatch: React.Dispatch<ActionV3>) {
+  const timerRef = useRef<number | null>(null);
+  const touched = state.saveStatus.lastTouchedAt;
+  const saved = state.saveStatus.lastSavedAt;
+
+  useEffect(() => {
+    if (touched === 0 || touched === saved) return; // never touched, or already saved
+    if (state.articles.length === 0) return; // nothing meaningful to save yet
+    if (timerRef.current) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => {
+      dispatch({ type: 'MARK_SAVING' });
+      try {
+        const json = JSON.stringify(serializeStateForDraft(state));
+        localStorage.setItem(V3_DRAFT_KEY, json);
+        dispatch({ type: 'MARK_SAVED', at: Date.now() });
+      } catch (e) {
+        dispatch({ type: 'MARK_SAVE_ERROR', error: (e as Error).message });
+      }
+    }, AUTOSAVE_DEBOUNCE_MS);
+    return () => {
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+    };
+  }, [touched, saved, state, dispatch]);
+}
+
+// Strip File objects (not JSON-serializable). Photo previews (data URLs) survive.
+function serializeStateForDraft(state: InspectionFormStateV3) {
+  return {
+    version: 3,
+    savedAt: Date.now(),
+    global: state.global,
+    articles: state.articles.map((a) => ({
+      ...a,
+      colors: a.colors.map((c) => ({
+        ...c,
+        sizes: c.sizes.map((s) => ({
+          ...s,
+          standardPhotos: {},
+          constructionPhotos: {},
+          notOkPhotosForm: {},
+          stackedGoodsPhoto: null,
+          otherPhotos: [],
+          consumerPiecesForm: s.consumerPiecesForm.map((p) => ({ ...p, file: undefined })),
+          unitLoadPhotosForm: s.unitLoadPhotosForm.map((p) => ({ ...p, file: undefined })),
+        })),
+      })),
+    })),
+  };
 }
 
 export function useInspectionFormV3(): CtxV3 {
