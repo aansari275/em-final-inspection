@@ -89,16 +89,16 @@ function FormShell() {
     [dispatch]
   );
 
+  // Show ALL OPS. No slicing — the user expects every OPS in the orders
+  // collection to be searchable. Scrolling handles long lists.
   const filtered = opsQuery.trim()
-    ? opsList
-        .filter((o) =>
-          [o.salesNo, o.buyerName, o.buyerCode, o.poNumber]
-            .join(' ')
-            .toLowerCase()
-            .includes(opsQuery.toLowerCase())
-        )
-        .slice(0, 12)
-    : opsList.slice(0, 12);
+    ? opsList.filter((o) =>
+        [o.salesNo, o.buyerName, o.buyerCode, o.poNumber]
+          .join(' ')
+          .toLowerCase()
+          .includes(opsQuery.toLowerCase())
+      )
+    : opsList;
 
   return (
     <div className="space-y-3">
@@ -139,7 +139,12 @@ function FormShell() {
           </div>
 
           {showOpsDropdown && filtered.length > 0 && (
-            <div className="absolute z-10 mt-1 w-full max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg">
+            <div className="absolute z-10 mt-1 w-full max-h-80 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg">
+              <div className="px-3 py-1.5 text-[11px] uppercase tracking-wide text-gray-500 border-b border-gray-100 bg-gray-50 sticky top-0">
+                {opsQuery.trim()
+                  ? `${filtered.length} match${filtered.length === 1 ? '' : 'es'}`
+                  : `Showing all ${opsList.length} OPS`}
+              </div>
               {filtered.map((o) => (
                 <button
                   key={o.salesNo}
@@ -156,6 +161,12 @@ function FormShell() {
                   </div>
                 </button>
               ))}
+            </div>
+          )}
+          {showOpsDropdown && opsQuery.trim() && filtered.length === 0 && (
+            <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg p-3 text-sm text-gray-600">
+              No match in the cached list ({opsList.length} OPS). Click Load to
+              search Firestore directly by OPS number.
             </div>
           )}
         </div>
