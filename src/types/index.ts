@@ -621,3 +621,6 @@ export const CONSTRUCTION_PHOTO_TYPES = [
   { key: 'productNetWeightPhoto', label: 'Product Net Weight' },
   { key: 'productGrossWeightPhoto', label: 'Product Gross Weight' },
 ] as const;
+
+// V3 hierarchy types (re-export)
+export * from './v3';

@@ -1,7 +1,7 @@
 import { useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Header } from './components/Header';
-import { FinalInspectionForm } from './components/FinalInspectionForm';
+import { FinalInspectionFormV3 } from './components/FinalInspectionFormV3';
 import { InspectionList } from './components/InspectionList';
 import { EmailSettings } from './components/EmailSettings';
 import { PWAUpdatePrompt } from './components/PWAUpdatePrompt';
@@ -94,7 +94,7 @@ function App() {
           <Header onLogout={handleLogout} />
           <main className="max-w-4xl mx-auto px-4 py-6">
             <Routes>
-              <Route path="/" element={<FinalInspectionForm />} />
+              <Route path="/" element={<FinalInspectionFormV3 />} />
               <Route path="/list" element={<InspectionList />} />
               <Route path="/settings" element={<EmailSettings />} />
             </Routes>

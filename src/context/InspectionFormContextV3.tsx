@@ -1,0 +1,548 @@
+import React, { createContext, useContext, useReducer, useCallback, useMemo, type ReactNode } from 'react';
+import {
+  type ArticleInspectionV3,
+  type ArticleAql,
+  type SizeInspectionFormState,
+  type Company,
+  type LabeledPhoto,
+  type Defect,
+} from '../types';
+
+// ─── Global form data (filled once, header) ───
+export interface GlobalFormDataV3 {
+  company: Company;
+  documentNo: string;
+  inspectionDate: string;
+  qcInspectorName: string;
+  customerName: string;
+  customerCode: string;
+  customerPoNo: string;
+  opsNo: string;
+  buyerDesignName: string;
+  emplDesignNo: string;
+  merchant: string;
+  totalOrderQty: string;
+}
+
+export interface InspectionFormStateV3 {
+  global: GlobalFormDataV3;
+  articles: ArticleInspectionV3[];
+  activeArticleId: string | null;
+  activeColorIdByArticle: Record<string, string | null>;
+  activeSizeIdByColor: Record<string, string | null>;
+  headerExpanded: boolean;
+  loading: boolean;
+  submitInFlight: Record<string, boolean>;
+}
+
+function todayISO(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
+export function createInitialStateV3(): InspectionFormStateV3 {
+  return {
+    global: {
+      company: 'EHI',
+      documentNo: 'EHI/IP/01',
+      inspectionDate: todayISO(),
+      qcInspectorName: '',
+      customerName: '',
+      customerCode: '',
+      customerPoNo: '',
+      opsNo: '',
+      buyerDesignName: '',
+      emplDesignNo: '',
+      merchant: '',
+      totalOrderQty: '',
+    },
+    articles: [],
+    activeArticleId: null,
+    activeColorIdByArticle: {},
+    activeSizeIdByColor: {},
+    headerExpanded: false,
+    loading: false,
+    submitInFlight: {},
+  };
+}
+
+// ─── Actions ───
+type ActionV3 =
+  | { type: 'SET_GLOBAL'; field: keyof GlobalFormDataV3; value: string }
+  | { type: 'SET_GLOBAL_BULK'; updates: Partial<GlobalFormDataV3> }
+  | { type: 'INIT_FROM_OPS_DATA'; articles: ArticleInspectionV3[] }
+  | { type: 'EXPAND_ARTICLE'; articleId: string | null }
+  | { type: 'EXPAND_COLOR'; articleId: string; colorId: string | null }
+  | { type: 'SELECT_SIZE_TAB'; colorId: string; sizeId: string }
+  | {
+      type: 'UPDATE_SIZE_FIELD';
+      articleId: string;
+      colorId: string;
+      sizeId: string;
+      field: string;
+      value: unknown;
+    }
+  | {
+      type: 'UPDATE_SIZE_PATCH';
+      articleId: string;
+      colorId: string;
+      sizeId: string;
+      patch: Partial<SizeInspectionFormState>;
+    }
+  | { type: 'SET_SIZE_DEFECTS'; articleId: string; colorId: string; sizeId: string; defects: Defect[] }
+  | {
+      type: 'SET_SIZE_PHOTO';
+      articleId: string;
+      colorId: string;
+      sizeId: string;
+      photoType: string;
+      category: 'standard' | 'construction' | 'notOk' | 'stackedGoods';
+      file: File | null;
+      preview: string;
+    }
+  | {
+      type: 'ADD_OTHER_PHOTO';
+      articleId: string;
+      colorId: string;
+      sizeId: string;
+      file: File;
+      preview: string;
+    }
+  | {
+      type: 'REMOVE_OTHER_PHOTO';
+      articleId: string;
+      colorId: string;
+      sizeId: string;
+      photoIndex: number;
+    }
+  | {
+      type: 'ADD_CONSUMER_PIECE';
+      articleId: string;
+      colorId: string;
+      sizeId: string;
+      piece: LabeledPhoto;
+    }
+  | {
+      type: 'UPDATE_CONSUMER_PIECE';
+      articleId: string;
+      colorId: string;
+      sizeId: string;
+      pieceIndex: number;
+      piece: LabeledPhoto;
+    }
+  | {
+      type: 'REMOVE_CONSUMER_PIECE';
+      articleId: string;
+      colorId: string;
+      sizeId: string;
+      pieceIndex: number;
+    }
+  | {
+      type: 'ADD_UNIT_LOAD_PHOTO';
+      articleId: string;
+      colorId: string;
+      sizeId: string;
+      photo: LabeledPhoto;
+    }
+  | {
+      type: 'UPDATE_UNIT_LOAD_PHOTO';
+      articleId: string;
+      colorId: string;
+      sizeId: string;
+      photoIndex: number;
+      photo: LabeledPhoto;
+    }
+  | {
+      type: 'REMOVE_UNIT_LOAD_PHOTO';
+      articleId: string;
+      colorId: string;
+      sizeId: string;
+      photoIndex: number;
+    }
+  | { type: 'UPDATE_ARTICLE_AQL'; articleId: string; aql: Partial<ArticleAql> }
+  | {
+      type: 'MARK_ARTICLE_SUBMITTED';
+      articleId: string;
+      submittedAt: string;
+      pdfUrl?: string;
+      emailStatus?: 'pending' | 'sending' | 'sent' | 'failed';
+      inspectionResult?: 'PASS' | 'FAIL';
+    }
+  | { type: 'SET_ARTICLE_SUBMIT_IN_FLIGHT'; articleId: string; inFlight: boolean }
+  | { type: 'TOGGLE_HEADER' }
+  | { type: 'SET_LOADING'; loading: boolean }
+  | { type: 'RESET' };
+
+// ─── Reducer helpers ───
+function mapSize(
+  state: InspectionFormStateV3,
+  articleId: string,
+  colorId: string,
+  sizeId: string,
+  updater: (s: SizeInspectionFormState) => SizeInspectionFormState
+): InspectionFormStateV3 {
+  return {
+    ...state,
+    articles: state.articles.map((a) => {
+      if (a.id !== articleId) return a;
+      return {
+        ...a,
+        colors: a.colors.map((c) => {
+          if (c.id !== colorId) return c;
+          return {
+            ...c,
+            sizes: c.sizes.map((s) => (s.id === sizeId ? updater(s) : s)),
+          };
+        }),
+      };
+    }),
+  };
+}
+
+// ─── Reducer ───
+function reducerV3(state: InspectionFormStateV3, action: ActionV3): InspectionFormStateV3 {
+  switch (action.type) {
+    case 'SET_GLOBAL':
+      return { ...state, global: { ...state.global, [action.field]: action.value } };
+
+    case 'SET_GLOBAL_BULK':
+      return { ...state, global: { ...state.global, ...action.updates } };
+
+    case 'INIT_FROM_OPS_DATA': {
+      const articles = action.articles;
+      const firstArticle = articles[0] ?? null;
+      const activeColorMap: Record<string, string | null> = {};
+      const activeSizeMap: Record<string, string | null> = {};
+      for (const a of articles) {
+        const firstColor = a.colors[0] ?? null;
+        activeColorMap[a.id] = firstColor?.id ?? null;
+        if (firstColor) {
+          activeSizeMap[firstColor.id] = firstColor.sizes[0]?.id ?? null;
+        }
+      }
+      return {
+        ...state,
+        articles,
+        activeArticleId: firstArticle?.id ?? null,
+        activeColorIdByArticle: activeColorMap,
+        activeSizeIdByColor: activeSizeMap,
+      };
+    }
+
+    case 'EXPAND_ARTICLE':
+      return { ...state, activeArticleId: action.articleId };
+
+    case 'EXPAND_COLOR':
+      return {
+        ...state,
+        activeColorIdByArticle: {
+          ...state.activeColorIdByArticle,
+          [action.articleId]: action.colorId,
+        },
+      };
+
+    case 'SELECT_SIZE_TAB':
+      return {
+        ...state,
+        activeSizeIdByColor: {
+          ...state.activeSizeIdByColor,
+          [action.colorId]: action.sizeId,
+        },
+      };
+
+    case 'UPDATE_SIZE_FIELD':
+      return mapSize(state, action.articleId, action.colorId, action.sizeId, (s) => ({
+        ...s,
+        [action.field]: action.value,
+      }));
+
+    case 'UPDATE_SIZE_PATCH':
+      return mapSize(state, action.articleId, action.colorId, action.sizeId, (s) => ({
+        ...s,
+        ...action.patch,
+      }));
+
+    case 'SET_SIZE_DEFECTS':
+      return mapSize(state, action.articleId, action.colorId, action.sizeId, (s) => ({
+        ...s,
+        defects: action.defects,
+      }));
+
+    case 'SET_SIZE_PHOTO':
+      return mapSize(state, action.articleId, action.colorId, action.sizeId, (s) => {
+        switch (action.category) {
+          case 'standard':
+            return {
+              ...s,
+              standardPhotos: { ...s.standardPhotos, [action.photoType]: action.file },
+              standardPhotoPreviews: {
+                ...s.standardPhotoPreviews,
+                [action.photoType]: action.preview,
+              },
+            };
+          case 'construction':
+            return {
+              ...s,
+              constructionPhotos: { ...s.constructionPhotos, [action.photoType]: action.file },
+              constructionPhotoPreviews: {
+                ...s.constructionPhotoPreviews,
+                [action.photoType]: action.preview,
+              },
+            };
+          case 'notOk':
+            return {
+              ...s,
+              notOkPhotosForm: { ...s.notOkPhotosForm, [action.photoType]: action.file },
+              notOkPreviews: { ...s.notOkPreviews, [action.photoType]: action.preview },
+            };
+          case 'stackedGoods':
+            return { ...s, stackedGoodsPhoto: action.file, stackedGoodsPreview: action.preview };
+          default:
+            return s;
+        }
+      });
+
+    case 'ADD_OTHER_PHOTO':
+      return mapSize(state, action.articleId, action.colorId, action.sizeId, (s) => ({
+        ...s,
+        otherPhotos: [...s.otherPhotos, action.file],
+        otherPhotoPreviews: [...s.otherPhotoPreviews, action.preview],
+      }));
+
+    case 'REMOVE_OTHER_PHOTO':
+      return mapSize(state, action.articleId, action.colorId, action.sizeId, (s) => ({
+        ...s,
+        otherPhotos: s.otherPhotos.filter((_, i) => i !== action.photoIndex),
+        otherPhotoPreviews: s.otherPhotoPreviews.filter((_, i) => i !== action.photoIndex),
+      }));
+
+    case 'ADD_CONSUMER_PIECE':
+      return mapSize(state, action.articleId, action.colorId, action.sizeId, (s) => ({
+        ...s,
+        consumerPiecesForm: [...s.consumerPiecesForm, action.piece],
+      }));
+
+    case 'UPDATE_CONSUMER_PIECE':
+      return mapSize(state, action.articleId, action.colorId, action.sizeId, (s) => ({
+        ...s,
+        consumerPiecesForm: s.consumerPiecesForm.map((p, i) =>
+          i === action.pieceIndex ? action.piece : p
+        ),
+      }));
+
+    case 'REMOVE_CONSUMER_PIECE':
+      return mapSize(state, action.articleId, action.colorId, action.sizeId, (s) => ({
+        ...s,
+        consumerPiecesForm: s.consumerPiecesForm.filter((_, i) => i !== action.pieceIndex),
+      }));
+
+    case 'ADD_UNIT_LOAD_PHOTO':
+      return mapSize(state, action.articleId, action.colorId, action.sizeId, (s) => ({
+        ...s,
+        unitLoadPhotosForm: [...s.unitLoadPhotosForm, action.photo],
+      }));
+
+    case 'UPDATE_UNIT_LOAD_PHOTO':
+      return mapSize(state, action.articleId, action.colorId, action.sizeId, (s) => ({
+        ...s,
+        unitLoadPhotosForm: s.unitLoadPhotosForm.map((p, i) =>
+          i === action.photoIndex ? action.photo : p
+        ),
+      }));
+
+    case 'REMOVE_UNIT_LOAD_PHOTO':
+      return mapSize(state, action.articleId, action.colorId, action.sizeId, (s) => ({
+        ...s,
+        unitLoadPhotosForm: s.unitLoadPhotosForm.filter((_, i) => i !== action.photoIndex),
+      }));
+
+    case 'UPDATE_ARTICLE_AQL':
+      return {
+        ...state,
+        articles: state.articles.map((a) =>
+          a.id === action.articleId ? { ...a, aql: { ...a.aql, ...action.aql } } : a
+        ),
+      };
+
+    case 'MARK_ARTICLE_SUBMITTED':
+      return {
+        ...state,
+        articles: state.articles.map((a) =>
+          a.id === action.articleId
+            ? {
+                ...a,
+                submittedAt: action.submittedAt,
+                pdfUrl: action.pdfUrl ?? a.pdfUrl,
+                emailStatus: action.emailStatus ?? a.emailStatus,
+                inspectionResult: action.inspectionResult ?? a.inspectionResult,
+              }
+            : a
+        ),
+      };
+
+    case 'SET_ARTICLE_SUBMIT_IN_FLIGHT':
+      return {
+        ...state,
+        submitInFlight: { ...state.submitInFlight, [action.articleId]: action.inFlight },
+      };
+
+    case 'TOGGLE_HEADER':
+      return { ...state, headerExpanded: !state.headerExpanded };
+
+    case 'SET_LOADING':
+      return { ...state, loading: action.loading };
+
+    case 'RESET':
+      return createInitialStateV3();
+
+    default:
+      return state;
+  }
+}
+
+// ─── Context ───
+interface CtxV3 {
+  state: InspectionFormStateV3;
+  dispatch: React.Dispatch<ActionV3>;
+}
+
+const Ctx = createContext<CtxV3 | null>(null);
+
+export function InspectionFormProviderV3({ children }: { children: ReactNode }) {
+  const [state, dispatch] = useReducer(reducerV3, undefined, createInitialStateV3);
+  const value = useMemo(() => ({ state, dispatch }), [state]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+export function useInspectionFormV3(): CtxV3 {
+  const ctx = useContext(Ctx);
+  if (!ctx) throw new Error('useInspectionFormV3 must be used within InspectionFormProviderV3');
+  return ctx;
+}
+
+// ─── Adapter: lets V2 SizeInspectionPanel work unchanged inside V3 ───
+// Returns a dispatch that translates V2 actions (with `index`) into V3 actions
+// (with articleId/colorId/sizeId) using the provided path.
+export function useV2CompatDispatch(
+  articleId: string,
+  colorId: string,
+  sizeId: string
+): (action: any) => void {
+  const { dispatch } = useInspectionFormV3();
+  return useCallback(
+    (action: any) => {
+      // Map V2 index-based actions onto V3 path-based actions.
+      switch (action.type) {
+        case 'SET_SIZE_FIELD':
+          dispatch({
+            type: 'UPDATE_SIZE_FIELD',
+            articleId,
+            colorId,
+            sizeId,
+            field: action.field,
+            value: action.value,
+          });
+          return;
+        case 'SET_SIZE_DEFECTS':
+          dispatch({
+            type: 'SET_SIZE_DEFECTS',
+            articleId,
+            colorId,
+            sizeId,
+            defects: action.defects,
+          });
+          return;
+        case 'SET_SIZE_PHOTO':
+          dispatch({
+            type: 'SET_SIZE_PHOTO',
+            articleId,
+            colorId,
+            sizeId,
+            photoType: action.photoType,
+            category: action.category,
+            file: action.file,
+            preview: action.preview,
+          });
+          return;
+        case 'ADD_SIZE_OTHER_PHOTO':
+          dispatch({
+            type: 'ADD_OTHER_PHOTO',
+            articleId,
+            colorId,
+            sizeId,
+            file: action.file,
+            preview: action.preview,
+          });
+          return;
+        case 'REMOVE_SIZE_OTHER_PHOTO':
+          dispatch({
+            type: 'REMOVE_OTHER_PHOTO',
+            articleId,
+            colorId,
+            sizeId,
+            photoIndex: action.photoIndex,
+          });
+          return;
+        case 'ADD_CONSUMER_PIECE':
+          dispatch({
+            type: 'ADD_CONSUMER_PIECE',
+            articleId,
+            colorId,
+            sizeId,
+            piece: action.piece,
+          });
+          return;
+        case 'UPDATE_CONSUMER_PIECE':
+          dispatch({
+            type: 'UPDATE_CONSUMER_PIECE',
+            articleId,
+            colorId,
+            sizeId,
+            pieceIndex: action.pieceIndex,
+            piece: action.piece,
+          });
+          return;
+        case 'REMOVE_CONSUMER_PIECE':
+          dispatch({
+            type: 'REMOVE_CONSUMER_PIECE',
+            articleId,
+            colorId,
+            sizeId,
+            pieceIndex: action.pieceIndex,
+          });
+          return;
+        case 'ADD_UNIT_LOAD_PHOTO':
+          dispatch({
+            type: 'ADD_UNIT_LOAD_PHOTO',
+            articleId,
+            colorId,
+            sizeId,
+            photo: action.photo,
+          });
+          return;
+        case 'UPDATE_UNIT_LOAD_PHOTO':
+          dispatch({
+            type: 'UPDATE_UNIT_LOAD_PHOTO',
+            articleId,
+            colorId,
+            sizeId,
+            photoIndex: action.photoIndex,
+            photo: action.photo,
+          });
+          return;
+        case 'REMOVE_UNIT_LOAD_PHOTO':
+          dispatch({
+            type: 'REMOVE_UNIT_LOAD_PHOTO',
+            articleId,
+            colorId,
+            sizeId,
+            photoIndex: action.photoIndex,
+          });
+          return;
+        default:
+          // Drop unsupported V2 actions silently (e.g., ADD_SIZE which doesn't make sense in V3)
+          return;
+      }
+    },
+    [dispatch, articleId, colorId, sizeId]
+  );
+}
