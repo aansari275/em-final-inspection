@@ -30,21 +30,60 @@ Final Inspection QC form application for Eastern Home Industries (EHI) and Easte
 
 ---
 
-## Planned V3 — Per-Article × Color × Size Hierarchy (Design 2026-05-13)
+## V3 — Per-Article × Color × Size Hierarchy (LIVE 2026-05-14)
 
-V2 ships flat per-size accordions per OPS. **V3 replaces V2** with a three-level hierarchy:
-**Article → Color → Size (tabs)**, with per-article AQL, per-article PDF/email submission, and an on-demand combined OPS roll-up.
+**V3 replaces V2 on the New Inspection route at `/`.** V1 + V2 historical records still render and resend from the Inspections list unchanged.
 
-- Design spec: [`docs/superpowers/specs/2026-05-13-per-article-color-size-hierarchy-design.md`](docs/superpowers/specs/2026-05-13-per-article-color-size-hierarchy-design.md)
-- Status: **design approved, implementation pending** (writing-plans skill next)
-- Hard cutover, no toggle. V1/V2 records remain readable via existing PDF paths.
-- New write format: `version: 3` on `final-inspections` documents. Shape: `articles[] → colors[] → sizes[]`, where each `SizeInspection` is identical to V2.
-- Submit-Article warning fires only when `inspectionResult` (PASS/FAIL) is missing on a size — never hard-blocks.
-- Submit-OPS-Summary button enabled once every article has been submitted at least once.
+### Hierarchy
+**Header (collapsible)** → **Article accordion** → **Color sub-accordion** → **Size tabs** → **Inspection content** (existing V2 sections inside each tab: quality checks, packaging, defects, photos, result).
+
+- Article + color + size structure is built from `orders/data/orders` → `items[]` via `buildArticleSkeletonFromOps()` (`src/types/v3.ts`).
+- AQL is **per-article** (each article block has its own Lot/Code/Sample/Accept/Reject/Rejected fields), auto-calculated by existing `aqlCalculator.ts`.
+- Sizes inside a color show as horizontal tabs with status dots: amber `●` = in-progress, green `✓` = PASS, red `✗` = FAIL.
+
+### Submit pipeline
+Each `Submit Article` click writes **one V2-shaped doc** to `final-inspections` with three extra fields: `opsRollupGroupId` (= OPS number), `articleName`, `v3SourceArticleId`. This lets V3 reuse the entire battle-tested V2 pipeline (PDF generator, send-email Netlify function, InspectionList read path, resend, merchant auto-CC) with zero rewrites:
+
+1. Firestore save (instant)
+2. Photo upload via `uploadPhotosInBackground` (8/batch, per-photo retry)
+3. PDF via `generateFinalInspectionPDF` → uploaded to Firebase Storage
+4. Email via `/.netlify/functions/send-email` with 3-retry × 10s backoff, auto-CC primary + assistant merchants from `buyers` by `customerCode`
+5. Article header badge transitions to `Submitted <date> · email sent` (green) or `· email failed` (amber)
+
+Subject line: `Final Inspection: <BUYER> / <OPS> / <ARTICLE> - <DESIGN> [PASS|FAIL]`
+
+### OPS roll-up
+`Submit OPS Summary Report` button (enabled once every article has been submitted at least once) queries `final-inspections` where `opsRollupGroupId == opsNo`, builds a summary HTML email listing every article with PASS/FAIL + Storage PDF download link, sends via the same retry-able function.
+
+### Autosave + draft restore
+- `useAutoSaveV3` hook in the V3 provider debounces 800ms after any data change, serializes the form state (File objects stripped, previews preserved) to `localStorage` under key `final_inspection_v3_draft`, dispatches `MARK_SAVED` with a timestamp.
+- `SaveStatusIndicator` above the active size renders `Saving…` / `All size details saved · Xs ago` / `Unsaved changes` / `Save error: <msg>`. Refreshes every 5s.
+- On page mount, `loadInitialStateFromStorage()` rehydrates any draft so refreshes don't lose work.
+- `Start new inspection` button under OPS Lookup wipes localStorage + dispatches `RESET`.
+
+### Files
+- `src/types/v3.ts` — V3 types + `buildArticleSkeletonFromOps`, `getIncompleteSizes`, `computeArticleResult`, `computeOpsResult`
+- `src/context/InspectionFormContextV3.tsx` — `InspectionFormProviderV3`, `useInspectionFormV3`, `useV2CompatDispatch` adapter (lets existing `SizeInspectionPanel` work inside V3 tabs unchanged), autosave hook, localStorage restore
+- `src/components/FinalInspectionFormV3.tsx` — top-level form (OPS lookup + hierarchy + roll-up button)
+- `src/components/v3/` — `CollapsibleHeader`, `ArticleAccordionList`, `ArticleAccordion`, `ArticleAqlBlock`, `ColorAccordion`, `SizeTabBar`, `SubmitArticleButton`, `PendingSizesPromptModal`, `SubmitOpsRollupButton`, `SaveStatusIndicator`
+- `src/lib/v3SubmitFlow.ts` — `submitArticleV3` + `submitOpsRollupV3` (reuses `buildV2EmailHtml`, `stripFilesFromSizes` exported from `FinalInspectionForm.tsx`)
+- `docs/superpowers/specs/2026-05-13-per-article-color-size-hierarchy-design.md` — design spec
+- `docs/superpowers/plans/2026-05-13-per-article-color-size-hierarchy.md` — implementation plan
+
+### V3 → V2-shaped storage shape
+Color granularity is preserved by **prefixing the color onto each size label** in the saved `sizeInspections`: e.g., a size `4×6` under color `Ivory` is saved as `"Ivory · 4×6"`. PDF + email render this directly.
+
+### Key decisions baked in
+- Hard cutover on the New Inspection route. V1 + V2 records still readable from the list.
+- Per-article PDF + email (not per-OPS) so merchants can be CC'd per design.
+- Pending-sizes warning only fires at Submit Article time (never hard-blocks).
+- Completion = PASS/FAIL chosen for that size (trust the inspector to fill what they need).
+- AQL is per-article (lot qty differs per design).
+- OPS dropdown shows **every** OPS, not capped at 12. Direct Firestore lookup via `getOpsByNumber()` runs when the dropdown has no match.
 
 ---
 
-## Form Architecture (V2 — Per-Size Inspections, Mar 2026)
+## Form Architecture (V2 — Per-Size Inspections, Mar 2026, LEGACY READ-ONLY)
 
 ### Global Sections (filled once)
 1. **Company Selection** — EHI or EMPL, auto-sets document number
