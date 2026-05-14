@@ -172,10 +172,34 @@ function FormShell() {
         </div>
         {opsError && <p className="text-sm text-rose-600 mt-2">{opsError}</p>}
         {!opsError && state.articles.length > 0 && (
-          <p className="text-xs text-emerald-700 mt-2">
-            Loaded {state.articles.length} article
-            {state.articles.length === 1 ? '' : 's'} for {state.global.opsNo}.
-          </p>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <p className="text-xs text-emerald-700">
+              Loaded {state.articles.length} article
+              {state.articles.length === 1 ? '' : 's'} for {state.global.opsNo}.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                if (
+                  window.confirm(
+                    'Discard current draft and start a fresh inspection? This clears autosaved data.'
+                  )
+                ) {
+                  try {
+                    localStorage.removeItem('final_inspection_v3_draft');
+                  } catch {
+                    /* ignore */
+                  }
+                  dispatch({ type: 'RESET' });
+                  setOpsQuery('');
+                  setOpsError(null);
+                }
+              }}
+              className="text-xs text-rose-600 hover:text-rose-700 underline"
+            >
+              Start new inspection
+            </button>
+          </div>
         )}
       </div>
 

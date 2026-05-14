@@ -474,8 +474,50 @@ const Ctx = createContext<CtxV3 | null>(null);
 const V3_DRAFT_KEY = 'final_inspection_v3_draft';
 const AUTOSAVE_DEBOUNCE_MS = 800;
 
+// Hydrate from localStorage on first mount (if a draft exists).
+// Falls back to empty state on parse error.
+function loadInitialStateFromStorage(): InspectionFormStateV3 {
+  const base = createInitialStateV3();
+  if (typeof window === 'undefined') return base;
+  try {
+    const raw = localStorage.getItem(V3_DRAFT_KEY);
+    if (!raw) return base;
+    const parsed = JSON.parse(raw);
+    if (parsed?.version !== 3 || !Array.isArray(parsed.articles)) return base;
+    // Restore active selections if articles still exist; otherwise re-derive.
+    const articles = parsed.articles as ArticleInspectionV3[];
+    const firstArticle = articles[0] ?? null;
+    const activeColorMap: Record<string, string | null> = {};
+    const activeSizeMap: Record<string, string | null> = {};
+    for (const a of articles) {
+      const firstColor = a.colors[0] ?? null;
+      activeColorMap[a.id] = firstColor?.id ?? null;
+      if (firstColor) {
+        activeSizeMap[firstColor.id] = firstColor.sizes[0]?.id ?? null;
+      }
+    }
+    return {
+      ...base,
+      global: { ...base.global, ...(parsed.global ?? {}) },
+      articles,
+      activeArticleId: firstArticle?.id ?? null,
+      activeColorIdByArticle: activeColorMap,
+      activeSizeIdByColor: activeSizeMap,
+      saveStatus: {
+        lastTouchedAt: parsed.savedAt ?? 0,
+        lastSavedAt: parsed.savedAt ?? 0,
+        saving: false,
+        error: null,
+      },
+    };
+  } catch (e) {
+    console.warn('[V3] failed to restore draft from localStorage', e);
+    return base;
+  }
+}
+
 export function InspectionFormProviderV3({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducerV3, undefined, createInitialStateV3);
+  const [state, dispatch] = useReducer(reducerV3, undefined, loadInitialStateFromStorage);
   useAutoSaveV3(state, dispatch);
   const value = useMemo(() => ({ state, dispatch }), [state]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

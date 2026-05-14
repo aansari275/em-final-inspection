@@ -299,7 +299,7 @@ interface DraftDataV2 {
 
 // ─── Build V2 email HTML ───
 
-function buildV2EmailHtml(
+export function buildV2EmailHtml(
   doc: FinalInspectionV2,
 ): string {
   const resultColor = doc.inspectionResult === 'PASS' ? '#22c55e' : '#ef4444';
@@ -683,7 +683,7 @@ function buildV2EmailHtml(
 
 // ─── Strip File objects from size inspections for draft/Firestore ───
 
-function stripFilesFromSizes(sizes: SizeInspectionFormState[]): SizeInspection[] {
+export function stripFilesFromSizes(sizes: SizeInspectionFormState[]): SizeInspection[] {
   return sizes.map(size => ({
     id: size.id,
     size: size.size,
