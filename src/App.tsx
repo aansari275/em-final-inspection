@@ -6,6 +6,7 @@ import { InspectionList } from './components/InspectionList';
 import { EmailSettings } from './components/EmailSettings';
 import { PWAUpdatePrompt } from './components/PWAUpdatePrompt';
 import Login from './components/Login';
+import DraftRecovery from './components/DraftRecovery';
 import { auth, logOut, onAuthStateChanged, type User } from './lib/firebase';
 
 // Error Boundary to prevent blank white screens
@@ -78,6 +79,18 @@ function App() {
       <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-100 flex items-center justify-center">
         <div className="w-8 h-8 border-3 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" />
       </div>
+    );
+  }
+
+  // Recovery route is public so inspectors can dump their device drafts
+  // without needing to be signed in.
+  if (typeof window !== 'undefined' && window.location.pathname === '/recover') {
+    return (
+      <ErrorBoundary>
+        <div className="min-h-screen bg-gray-50">
+          <DraftRecovery />
+        </div>
+      </ErrorBoundary>
     );
   }
 
