@@ -180,7 +180,7 @@ type ActionV3 =
   | { type: 'TOGGLE_HEADER' }
   | { type: 'SET_LOADING'; loading: boolean }
   | { type: 'MARK_SAVING' }
-  | { type: 'MARK_SAVED'; at: number }
+  | { type: 'MARK_SAVED'; at: number; touchedAtAtSaveStart: number }
   | { type: 'MARK_SAVE_ERROR'; error: string }
   | { type: 'RESET' };
 
@@ -252,11 +252,52 @@ function innerReducerV3(state: InspectionFormStateV3, action: ActionV3): Inspect
       return { ...state, global: { ...state.global, ...action.updates } };
 
     case 'INIT_FROM_OPS_DATA': {
-      const articles = action.articles;
-      const firstArticle = articles[0] ?? null;
+      // CRITICAL: this action used to wipe everything by replacing the articles
+      // array with a fresh skeleton (new UUIDs everywhere), even when the
+      // inspector was reloading the same OPS. Any filled work was lost.
+      //
+      // Defense: merge filled data from current state into the new skeleton by
+      // matching on (articleName, colorName, sizeLabel) before replacing.
+      const incoming = action.articles;
+      const merged = incoming.map((newArticle) => {
+        const oldArticle = state.articles.find(
+          (a) => a.articleName === newArticle.articleName
+        );
+        if (!oldArticle) return newArticle;
+        // Carry over per-article AQL + submission state + remarks
+        return {
+          ...newArticle,
+          aql: oldArticle.aql ?? newArticle.aql,
+          submittedAt: oldArticle.submittedAt,
+          pdfUrl: oldArticle.pdfUrl,
+          emailStatus: oldArticle.emailStatus,
+          inspectionResult: oldArticle.inspectionResult,
+          remarks: oldArticle.remarks,
+          colors: newArticle.colors.map((newColor) => {
+            const oldColor = oldArticle.colors.find(
+              (c) => c.colorName === newColor.colorName
+            );
+            if (!oldColor) return newColor;
+            return {
+              ...newColor,
+              sizes: newColor.sizes.map((newSize) => {
+                const oldSize = oldColor.sizes.find(
+                  (s) => (s.size || '') === (newSize.size || '')
+                );
+                if (!oldSize) return newSize;
+                // Preserve all filled fields but keep the NEW id so React keys
+                // stay consistent within this state revision.
+                return { ...oldSize, id: newSize.id };
+              }),
+            };
+          }),
+        };
+      });
+
+      const firstArticle = merged[0] ?? null;
       const activeColorMap: Record<string, string | null> = {};
       const activeSizeMap: Record<string, string | null> = {};
-      for (const a of articles) {
+      for (const a of merged) {
         const firstColor = a.colors[0] ?? null;
         activeColorMap[a.id] = firstColor?.id ?? null;
         if (firstColor) {
@@ -265,7 +306,7 @@ function innerReducerV3(state: InspectionFormStateV3, action: ActionV3): Inspect
       }
       return {
         ...state,
-        articles,
+        articles: merged,
         activeArticleId: firstArticle?.id ?? null,
         activeColorIdByArticle: activeColorMap,
         activeSizeIdByColor: activeSizeMap,
@@ -439,12 +480,15 @@ function innerReducerV3(state: InspectionFormStateV3, action: ActionV3): Inspect
       return { ...state, saveStatus: { ...state.saveStatus, saving: true, error: null } };
 
     case 'MARK_SAVED':
+      // CRITICAL: lastSavedAt must equal lastTouchedAt-AT-SAVE-START, not the
+      // current Date.now(). Otherwise touched === saved is never true and the
+      // autosave effect re-fires forever, racing with the user's edits.
       return {
         ...state,
         saveStatus: {
           ...state.saveStatus,
           saving: false,
-          lastSavedAt: action.at,
+          lastSavedAt: action.touchedAtAtSaveStart,
           error: null,
         },
       };
@@ -523,24 +567,45 @@ export function InspectionFormProviderV3({ children }: { children: ReactNode }) 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
-// Debounced autosave: every time lastTouchedAt changes (= data was edited),
-// schedule a save 800ms later. Writes a JSON-safe slice of state to localStorage
-// (Files / Blob objects are stripped; previews and field values are preserved).
+// Debounced autosave + synchronous flush on page unload.
+// Writes a JSON-safe slice of state to localStorage (Files stripped; previews
+// and field values preserved). The pagehide / beforeunload listeners flush any
+// pending save SYNCHRONOUSLY before the page goes away — so the inspector
+// never loses unsaved work to a tab close, navigation, or PWA SW activation.
 function useAutoSaveV3(state: InspectionFormStateV3, dispatch: React.Dispatch<ActionV3>) {
   const timerRef = useRef<number | null>(null);
+  // Hold the latest state in a ref so the pagehide listener can read it without
+  // re-binding on every state change.
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const touched = state.saveStatus.lastTouchedAt;
   const saved = state.saveStatus.lastSavedAt;
 
+  // Synchronous flush helper. Safe to call from pagehide/beforeunload.
+  const flush = useCallback(() => {
+    const s = stateRef.current;
+    if (s.saveStatus.lastTouchedAt === 0) return;
+    if (s.saveStatus.lastTouchedAt === s.saveStatus.lastSavedAt) return;
+    if (s.articles.length === 0) return;
+    try {
+      localStorage.setItem(V3_DRAFT_KEY, JSON.stringify(serializeStateForDraft(s)));
+    } catch (e) {
+      console.warn('[V3] flush save failed', e);
+    }
+  }, []);
+
+  // Debounced background autosave.
   useEffect(() => {
-    if (touched === 0 || touched === saved) return; // never touched, or already saved
-    if (state.articles.length === 0) return; // nothing meaningful to save yet
+    if (touched === 0 || touched === saved) return;
+    if (state.articles.length === 0) return;
     if (timerRef.current) window.clearTimeout(timerRef.current);
+    const touchedAtAtSaveStart = touched;
     timerRef.current = window.setTimeout(() => {
       dispatch({ type: 'MARK_SAVING' });
       try {
-        const json = JSON.stringify(serializeStateForDraft(state));
+        const json = JSON.stringify(serializeStateForDraft(stateRef.current));
         localStorage.setItem(V3_DRAFT_KEY, json);
-        dispatch({ type: 'MARK_SAVED', at: Date.now() });
+        dispatch({ type: 'MARK_SAVED', at: Date.now(), touchedAtAtSaveStart });
       } catch (e) {
         dispatch({ type: 'MARK_SAVE_ERROR', error: (e as Error).message });
       }
@@ -548,7 +613,22 @@ function useAutoSaveV3(state: InspectionFormStateV3, dispatch: React.Dispatch<Ac
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current);
     };
-  }, [touched, saved, state, dispatch]);
+  }, [touched, saved, state.articles.length, dispatch]);
+
+  // Sync flush on page hide / unload — guarantees the latest typing survives
+  // a browser close, navigation, or PWA service-worker update reload.
+  useEffect(() => {
+    const onUnload = () => flush();
+    window.addEventListener('pagehide', onUnload);
+    window.addEventListener('beforeunload', onUnload);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flush();
+    });
+    return () => {
+      window.removeEventListener('pagehide', onUnload);
+      window.removeEventListener('beforeunload', onUnload);
+    };
+  }, [flush]);
 }
 
 // Strip File objects (not JSON-serializable). Photo previews (data URLs) survive.

@@ -52,10 +52,43 @@ function FormShell() {
   const loadOps = useCallback(
     async (opsNo: string) => {
       if (!opsNo.trim()) return;
+      const trimmed = opsNo.trim();
+
+      // CRITICAL GUARD #1: if the user is reloading the SAME OPS that's
+      // currently loaded, do nothing — preserve all in-flight work.
+      if (
+        state.global.opsNo === trimmed &&
+        state.articles.length > 0
+      ) {
+        setShowOpsDropdown(false);
+        setOpsQuery(trimmed);
+        return;
+      }
+
+      // CRITICAL GUARD #2: switching to a DIFFERENT OPS while there is
+      // existing work needs explicit confirmation. Even though the reducer
+      // merges by name where possible, swapping OPSes wipes structure.
+      const hasWork =
+        state.articles.length > 0 &&
+        state.saveStatus.lastTouchedAt > 0 &&
+        !!state.global.opsNo &&
+        state.global.opsNo !== trimmed;
+      if (hasWork) {
+        const ok = window.confirm(
+          `You have in-progress work for OPS ${state.global.opsNo}. ` +
+            `Loading OPS ${trimmed} will discard it. Continue?`
+        );
+        if (!ok) {
+          setShowOpsDropdown(false);
+          setOpsQuery(state.global.opsNo);
+          return;
+        }
+      }
+
       setOpsLookupLoading(true);
       setOpsError(null);
       try {
-        const ops = await getOpsByNumber(opsNo.trim());
+        const ops = await getOpsByNumber(trimmed);
         if (!ops) {
           setOpsError(`OPS ${opsNo} not found.`);
           return;
@@ -86,7 +119,7 @@ function FormShell() {
         setOpsLookupLoading(false);
       }
     },
-    [dispatch]
+    [dispatch, state.global.opsNo, state.articles.length, state.saveStatus.lastTouchedAt]
   );
 
   // Show ALL OPS. No slicing — the user expects every OPS in the orders
