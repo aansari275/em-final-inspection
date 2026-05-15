@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Loader2, Search } from 'lucide-react';
 import { getOpsByNumber, getOpsList } from '../lib/firebase';
-import { buildArticleSkeletonFromOps } from '../types';
+import { buildArticleSkeletonFromOps, type ArticleInspectionV3 } from '../types';
 import {
   InspectionFormProviderV3,
   useInspectionFormV3,
 } from '../context/InspectionFormContextV3';
+import { loadCloudDraftV3, deleteCloudDraftV3 } from '../lib/v3CloudDraft';
 import CollapsibleHeader from './v3/CollapsibleHeader';
 import ArticleAccordionList from './v3/ArticleAccordionList';
 import SubmitOpsRollupButton from './v3/SubmitOpsRollupButton';
@@ -93,24 +94,60 @@ function FormShell() {
           setOpsError(`OPS ${opsNo} not found.`);
           return;
         }
-        const articles = buildArticleSkeletonFromOps(ops);
-        if (articles.length === 0) {
+        const skeletonArticles = buildArticleSkeletonFromOps(ops);
+        if (skeletonArticles.length === 0) {
           setOpsError(`OPS ${opsNo} has no articles. Add items in the Orders app first.`);
           return;
         }
+
+        // Cloud-draft restore: if this inspector has a cloud draft for this
+        // OPS, prefer it over a fresh skeleton — that's the saved tab work.
+        // Failures (network down, no draft) silently fall through to skeleton.
+        let cloudDraft: { articles: ArticleInspectionV3[]; global: Record<string, string> } | null = null;
+        try {
+          const saved = await loadCloudDraftV3(ops.salesNo);
+          if (
+            saved &&
+            Array.isArray(saved.articles) &&
+            saved.articles.length > 0
+          ) {
+            cloudDraft = {
+              articles: saved.articles as ArticleInspectionV3[],
+              global: (saved.global as Record<string, string>) || {},
+            };
+          }
+        } catch {
+          /* ignore — fall through to fresh skeleton */
+        }
+
+        // Order: start from canonical OPS-derived fields, then overlay the
+        // cloud draft's saved values (inspector name, date, any edits), then
+        // force opsNo back to what was just selected so it can never drift.
+        const opsCanonical = {
+          customerName: ops.buyerName,
+          customerCode: ops.buyerCode,
+          customerPoNo: ops.poNumber,
+          totalOrderQty: String(ops.totalPcs ?? 0),
+          company: ops.companyCode,
+          documentNo: ops.companyCode === 'EHI' ? 'EHI/IP/01' : 'EMPL/IP/01',
+        };
         dispatch({
           type: 'SET_GLOBAL_BULK',
           updates: {
+            ...opsCanonical,
+            ...(cloudDraft?.global ?? {}),
             opsNo: ops.salesNo,
-            customerName: ops.buyerName,
-            customerCode: ops.buyerCode,
-            customerPoNo: ops.poNumber,
-            totalOrderQty: String(ops.totalPcs ?? 0),
-            company: ops.companyCode,
-            documentNo: ops.companyCode === 'EHI' ? 'EHI/IP/01' : 'EMPL/IP/01',
           },
         });
-        dispatch({ type: 'INIT_FROM_OPS_DATA', articles });
+        if (cloudDraft) {
+          dispatch({
+            type: 'HYDRATE_FROM_SAVED',
+            global: {},
+            articles: cloudDraft.articles,
+          });
+        } else {
+          dispatch({ type: 'INIT_FROM_OPS_DATA', articles: skeletonArticles });
+        }
         setShowOpsDropdown(false);
         setOpsQuery(ops.salesNo);
       } catch (e) {
@@ -222,6 +259,12 @@ function FormShell() {
                     localStorage.removeItem('final_inspection_v3_draft');
                   } catch {
                     /* ignore */
+                  }
+                  // Also remove the cloud mirror — otherwise reopening this
+                  // OPS would silently restore the discarded work.
+                  const opsToClear = state.global.opsNo;
+                  if (opsToClear) {
+                    void deleteCloudDraftV3(opsToClear);
                   }
                   dispatch({ type: 'RESET' });
                   setOpsQuery('');

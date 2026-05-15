@@ -35,6 +35,7 @@ import { generateFinalInspectionPDF } from './pdfGenerator';
 import { emailSettingsService } from './emailSettingsService';
 import { stripFilesFromSizes, buildV2EmailHtml } from '../components/FinalInspectionForm';
 import type { GlobalFormDataV3 } from '../context/InspectionFormContextV3';
+import { deleteCloudDraftV3 } from './v3CloudDraft';
 
 const COLLECTION = 'final-inspections';
 const MAX_RETRIES = 3;
@@ -371,6 +372,10 @@ export async function submitOpsRollupV3(opsNo: string): Promise<SubmitRollupResu
         body: payload,
       });
       if (!res.ok) throw new Error(`send-email returned ${res.status}`);
+      // OPS is fully submitted — remove the cloud draft so the inspector
+      // doesn't see a stale resume on next open. Errors here are non-fatal:
+      // the submission already succeeded.
+      void deleteCloudDraftV3(opsNo).catch(() => {});
       return { status: 'sent', articleCount };
     } catch (err) {
       console.warn(`[V3 rollup] email attempt ${attempt}/${MAX_RETRIES} failed`, err);

@@ -7,6 +7,7 @@ import {
   type LabeledPhoto,
   type Defect,
 } from '../types';
+import { saveCloudDraftV3 } from '../lib/v3CloudDraft';
 
 // ─── Global form data (filled once, header) ───
 export interface GlobalFormDataV3 {
@@ -79,6 +80,11 @@ type ActionV3 =
   | { type: 'SET_GLOBAL'; field: keyof GlobalFormDataV3; value: string }
   | { type: 'SET_GLOBAL_BULK'; updates: Partial<GlobalFormDataV3> }
   | { type: 'INIT_FROM_OPS_DATA'; articles: ArticleInspectionV3[] }
+  | {
+      type: 'HYDRATE_FROM_SAVED';
+      global: Partial<GlobalFormDataV3>;
+      articles: ArticleInspectionV3[];
+    }
   | { type: 'EXPAND_ARTICLE'; articleId: string | null }
   | { type: 'EXPAND_COLOR'; articleId: string; colorId: string | null }
   | { type: 'SELECT_SIZE_TAB'; colorId: string; sizeId: string }
@@ -185,6 +191,9 @@ type ActionV3 =
   | { type: 'RESET' };
 
 // Action types that modify form data and should bump lastTouchedAt.
+// HYDRATE_FROM_SAVED is deliberately excluded — restoring a saved draft is
+// not a user edit, and bumping lastTouchedAt would trigger an immediate
+// re-save round trip.
 const DATA_CHANGING_ACTIONS = new Set<ActionV3['type']>([
   'SET_GLOBAL',
   'SET_GLOBAL_BULK',
@@ -307,6 +316,31 @@ function innerReducerV3(state: InspectionFormStateV3, action: ActionV3): Inspect
       return {
         ...state,
         articles: merged,
+        activeArticleId: firstArticle?.id ?? null,
+        activeColorIdByArticle: activeColorMap,
+        activeSizeIdByColor: activeSizeMap,
+      };
+    }
+
+    case 'HYDRATE_FROM_SAVED': {
+      // Wholesale restore from a previously saved draft (localStorage or
+      // cloud). Unlike INIT_FROM_OPS_DATA we don't merge with current state —
+      // the caller has already determined the saved version is what we want.
+      const articles = action.articles;
+      const firstArticle = articles[0] ?? null;
+      const activeColorMap: Record<string, string | null> = {};
+      const activeSizeMap: Record<string, string | null> = {};
+      for (const a of articles) {
+        const firstColor = a.colors[0] ?? null;
+        activeColorMap[a.id] = firstColor?.id ?? null;
+        if (firstColor) {
+          activeSizeMap[firstColor.id] = firstColor.sizes[0]?.id ?? null;
+        }
+      }
+      return {
+        ...state,
+        global: { ...state.global, ...action.global },
+        articles,
         activeArticleId: firstArticle?.id ?? null,
         activeColorIdByArticle: activeColorMap,
         activeSizeIdByColor: activeSizeMap,
@@ -517,6 +551,11 @@ const Ctx = createContext<CtxV3 | null>(null);
 
 const V3_DRAFT_KEY = 'final_inspection_v3_draft';
 const AUTOSAVE_DEBOUNCE_MS = 800;
+// Cloud autosave is on a coarser cadence: localStorage stays the fast path
+// (every ~800ms) so typing always survives a reload, and Firestore catches up
+// every 15s + on pagehide so a dead/wiped/replaced device no longer means lost
+// work. See src/lib/v3CloudDraft.ts.
+const CLOUD_AUTOSAVE_DEBOUNCE_MS = 15_000;
 
 // Hydrate from localStorage on first mount (if a draft exists).
 // Falls back to empty state on parse error.
@@ -629,6 +668,57 @@ function useAutoSaveV3(state: InspectionFormStateV3, dispatch: React.Dispatch<Ac
       window.removeEventListener('beforeunload', onUnload);
     };
   }, [flush]);
+
+  // ─── Cloud autosave (coarse cadence, fire-and-forget) ───
+  // Why: localStorage alone means a wiped browser / replaced device = total
+  // loss of every tab the inspector filled in. Mirroring to Firestore every
+  // 15s + on pagehide makes the work device-portable and recoverable.
+  const cloudTimerRef = useRef<number | null>(null);
+  const lastCloudSavedAtRef = useRef<number>(0);
+
+  const flushCloud = useCallback(() => {
+    const s = stateRef.current;
+    if (!s.global.opsNo) return;
+    if (s.articles.length === 0) return;
+    if (s.saveStatus.lastTouchedAt === 0) return;
+    if (s.saveStatus.lastTouchedAt === lastCloudSavedAtRef.current) return;
+    const snapshot = serializeStateForDraft(s);
+    lastCloudSavedAtRef.current = s.saveStatus.lastTouchedAt;
+    // Fire and forget — never block UI on the network. Any failure is logged
+    // by saveCloudDraftV3; the next 15s tick or pagehide flush will retry.
+    saveCloudDraftV3(s.global.opsNo, snapshot, {
+      inspectorName: s.global.qcInspectorName,
+      customerCode: s.global.customerCode,
+    }).catch((e) => console.warn('[V3] cloud autosave failed', e));
+  }, []);
+
+  useEffect(() => {
+    if (touched === 0 || touched === lastCloudSavedAtRef.current) return;
+    if (state.articles.length === 0) return;
+    if (!state.global.opsNo) return;
+    if (cloudTimerRef.current) window.clearTimeout(cloudTimerRef.current);
+    cloudTimerRef.current = window.setTimeout(() => {
+      flushCloud();
+    }, CLOUD_AUTOSAVE_DEBOUNCE_MS);
+    return () => {
+      if (cloudTimerRef.current) window.clearTimeout(cloudTimerRef.current);
+    };
+  }, [touched, state.articles.length, state.global.opsNo, flushCloud]);
+
+  useEffect(() => {
+    const onUnload = () => {
+      // Best-effort sync flush — modern browsers give a brief window for
+      // network calls during pagehide. saveCloudDraftV3 uses fetch under the
+      // hood via the Firestore SDK; we deliberately don't await it.
+      flushCloud();
+    };
+    window.addEventListener('pagehide', onUnload);
+    window.addEventListener('beforeunload', onUnload);
+    return () => {
+      window.removeEventListener('pagehide', onUnload);
+      window.removeEventListener('beforeunload', onUnload);
+    };
+  }, [flushCloud]);
 }
 
 // Strip File objects (not JSON-serializable). Photo previews (data URLs) survive.
