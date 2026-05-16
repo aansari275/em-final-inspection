@@ -255,16 +255,19 @@ function FormShell() {
                     'Discard current draft and start a fresh inspection? This clears autosaved data.'
                   )
                 ) {
+                  // Delete the cloud draft — otherwise reopening this OPS
+                  // would silently restore the discarded work.
+                  const opsToClear = state.global.opsNo;
+                  if (opsToClear) {
+                    void deleteCloudDraftV3(opsToClear);
+                  }
+                  // Belt and suspenders: clear any legacy localStorage key
+                  // from before the cloud-only migration so stale browsers
+                  // don't accidentally revive old text via that path.
                   try {
                     localStorage.removeItem('final_inspection_v3_draft');
                   } catch {
                     /* ignore */
-                  }
-                  // Also remove the cloud mirror — otherwise reopening this
-                  // OPS would silently restore the discarded work.
-                  const opsToClear = state.global.opsNo;
-                  if (opsToClear) {
-                    void deleteCloudDraftV3(opsToClear);
                   }
                   dispatch({ type: 'RESET' });
                   setOpsQuery('');

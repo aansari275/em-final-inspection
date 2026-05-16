@@ -549,176 +549,95 @@ interface CtxV3 {
 
 const Ctx = createContext<CtxV3 | null>(null);
 
-const V3_DRAFT_KEY = 'final_inspection_v3_draft';
-const AUTOSAVE_DEBOUNCE_MS = 800;
-// Cloud autosave is on a coarser cadence: localStorage stays the fast path
-// (every ~800ms) so typing always survives a reload, and Firestore catches up
-// every 15s + on pagehide so a dead/wiped/replaced device no longer means lost
-// work. See src/lib/v3CloudDraft.ts.
-const CLOUD_AUTOSAVE_DEBOUNCE_MS = 15_000;
-
-// Hydrate from localStorage on first mount (if a draft exists).
-// Falls back to empty state on parse error.
-function loadInitialStateFromStorage(): InspectionFormStateV3 {
-  const base = createInitialStateV3();
-  if (typeof window === 'undefined') return base;
-  try {
-    const raw = localStorage.getItem(V3_DRAFT_KEY);
-    if (!raw) return base;
-    const parsed = JSON.parse(raw);
-    if (parsed?.version !== 3 || !Array.isArray(parsed.articles)) return base;
-    // Restore active selections if articles still exist; otherwise re-derive.
-    const articles = parsed.articles as ArticleInspectionV3[];
-    const firstArticle = articles[0] ?? null;
-    const activeColorMap: Record<string, string | null> = {};
-    const activeSizeMap: Record<string, string | null> = {};
-    for (const a of articles) {
-      const firstColor = a.colors[0] ?? null;
-      activeColorMap[a.id] = firstColor?.id ?? null;
-      if (firstColor) {
-        activeSizeMap[firstColor.id] = firstColor.sizes[0]?.id ?? null;
-      }
-    }
-    return {
-      ...base,
-      global: { ...base.global, ...(parsed.global ?? {}) },
-      articles,
-      activeArticleId: firstArticle?.id ?? null,
-      activeColorIdByArticle: activeColorMap,
-      activeSizeIdByColor: activeSizeMap,
-      saveStatus: {
-        lastTouchedAt: parsed.savedAt ?? 0,
-        lastSavedAt: parsed.savedAt ?? 0,
-        saving: false,
-        error: null,
-      },
-    };
-  } catch (e) {
-    console.warn('[V3] failed to restore draft from localStorage', e);
-    return base;
-  }
-}
+// Cloud autosave cadence. Tight enough that the inspector loses at most this
+// many ms of typing on an unexpected close; loose enough that Firestore isn't
+// hammered while someone is actively typing. Firestore's offline persistence
+// queues writes locally and replays on reconnect, so this also works offline.
+const AUTOSAVE_DEBOUNCE_MS = 1500;
 
 export function InspectionFormProviderV3({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducerV3, undefined, loadInitialStateFromStorage);
+  const [state, dispatch] = useReducer(reducerV3, undefined, createInitialStateV3);
   useAutoSaveV3(state, dispatch);
   const value = useMemo(() => ({ state, dispatch }), [state]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
-// Debounced autosave + synchronous flush on page unload.
-// Writes a JSON-safe slice of state to localStorage (Files stripped; previews
-// and field values preserved). The pagehide / beforeunload listeners flush any
-// pending save SYNCHRONOUSLY before the page goes away — so the inspector
-// never loses unsaved work to a tab close, navigation, or PWA SW activation.
+// Cloud-only debounced autosave + sync flush on page hide.
+// Writes the article tree to Firestore (final_inspection_v3_drafts). NO
+// localStorage layer — localStorage doesn't survive device wipe / browser
+// replacement / wrong-browser opens, which is the whole point of autosave.
+// Offline resilience is handled by Firestore's IndexedDB persistence cache
+// configured in src/lib/firebase.ts.
 function useAutoSaveV3(state: InspectionFormStateV3, dispatch: React.Dispatch<ActionV3>) {
   const timerRef = useRef<number | null>(null);
-  // Hold the latest state in a ref so the pagehide listener can read it without
-  // re-binding on every state change.
+  // Hold the latest state in a ref so the pagehide listener reads the freshest
+  // snapshot without re-binding on every state change.
   const stateRef = useRef(state);
   stateRef.current = state;
   const touched = state.saveStatus.lastTouchedAt;
   const saved = state.saveStatus.lastSavedAt;
+  // Tracks the touchedAt that triggered the in-flight cloud write so we don't
+  // re-save the same snapshot multiple times.
+  const inflightTouchedAtRef = useRef<number>(0);
 
-  // Synchronous flush helper. Safe to call from pagehide/beforeunload.
-  const flush = useCallback(() => {
+  const performSave = useCallback(async () => {
     const s = stateRef.current;
     if (s.saveStatus.lastTouchedAt === 0) return;
     if (s.saveStatus.lastTouchedAt === s.saveStatus.lastSavedAt) return;
     if (s.articles.length === 0) return;
+    if (!s.global.opsNo) return;
+    if (s.saveStatus.lastTouchedAt === inflightTouchedAtRef.current) return;
+    const touchedAtAtSaveStart = s.saveStatus.lastTouchedAt;
+    inflightTouchedAtRef.current = touchedAtAtSaveStart;
+    dispatch({ type: 'MARK_SAVING' });
     try {
-      localStorage.setItem(V3_DRAFT_KEY, JSON.stringify(serializeStateForDraft(s)));
+      const snapshot = serializeStateForDraft(s);
+      await saveCloudDraftV3(s.global.opsNo, snapshot, {
+        inspectorName: s.global.qcInspectorName,
+        customerCode: s.global.customerCode,
+      });
+      dispatch({ type: 'MARK_SAVED', at: Date.now(), touchedAtAtSaveStart });
     } catch (e) {
-      console.warn('[V3] flush save failed', e);
+      console.warn('[V3] cloud autosave failed', e);
+      dispatch({ type: 'MARK_SAVE_ERROR', error: (e as Error).message });
     }
-  }, []);
+  }, [dispatch]);
 
-  // Debounced background autosave.
+  // Debounced autosave on every edit.
   useEffect(() => {
     if (touched === 0 || touched === saved) return;
     if (state.articles.length === 0) return;
+    if (!state.global.opsNo) return;
     if (timerRef.current) window.clearTimeout(timerRef.current);
-    const touchedAtAtSaveStart = touched;
     timerRef.current = window.setTimeout(() => {
-      dispatch({ type: 'MARK_SAVING' });
-      try {
-        const json = JSON.stringify(serializeStateForDraft(stateRef.current));
-        localStorage.setItem(V3_DRAFT_KEY, json);
-        dispatch({ type: 'MARK_SAVED', at: Date.now(), touchedAtAtSaveStart });
-      } catch (e) {
-        dispatch({ type: 'MARK_SAVE_ERROR', error: (e as Error).message });
-      }
+      void performSave();
     }, AUTOSAVE_DEBOUNCE_MS);
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current);
     };
-  }, [touched, saved, state.articles.length, dispatch]);
+  }, [touched, saved, state.articles.length, state.global.opsNo, performSave]);
 
-  // Sync flush on page hide / unload — guarantees the latest typing survives
-  // a browser close, navigation, or PWA service-worker update reload.
-  useEffect(() => {
-    const onUnload = () => flush();
-    window.addEventListener('pagehide', onUnload);
-    window.addEventListener('beforeunload', onUnload);
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') flush();
-    });
-    return () => {
-      window.removeEventListener('pagehide', onUnload);
-      window.removeEventListener('beforeunload', onUnload);
-    };
-  }, [flush]);
-
-  // ─── Cloud autosave (coarse cadence, fire-and-forget) ───
-  // Why: localStorage alone means a wiped browser / replaced device = total
-  // loss of every tab the inspector filled in. Mirroring to Firestore every
-  // 15s + on pagehide makes the work device-portable and recoverable.
-  const cloudTimerRef = useRef<number | null>(null);
-  const lastCloudSavedAtRef = useRef<number>(0);
-
-  const flushCloud = useCallback(() => {
-    const s = stateRef.current;
-    if (!s.global.opsNo) return;
-    if (s.articles.length === 0) return;
-    if (s.saveStatus.lastTouchedAt === 0) return;
-    if (s.saveStatus.lastTouchedAt === lastCloudSavedAtRef.current) return;
-    const snapshot = serializeStateForDraft(s);
-    lastCloudSavedAtRef.current = s.saveStatus.lastTouchedAt;
-    // Fire and forget — never block UI on the network. Any failure is logged
-    // by saveCloudDraftV3; the next 15s tick or pagehide flush will retry.
-    saveCloudDraftV3(s.global.opsNo, snapshot, {
-      inspectorName: s.global.qcInspectorName,
-      customerCode: s.global.customerCode,
-    }).catch((e) => console.warn('[V3] cloud autosave failed', e));
-  }, []);
-
-  useEffect(() => {
-    if (touched === 0 || touched === lastCloudSavedAtRef.current) return;
-    if (state.articles.length === 0) return;
-    if (!state.global.opsNo) return;
-    if (cloudTimerRef.current) window.clearTimeout(cloudTimerRef.current);
-    cloudTimerRef.current = window.setTimeout(() => {
-      flushCloud();
-    }, CLOUD_AUTOSAVE_DEBOUNCE_MS);
-    return () => {
-      if (cloudTimerRef.current) window.clearTimeout(cloudTimerRef.current);
-    };
-  }, [touched, state.articles.length, state.global.opsNo, flushCloud]);
-
+  // Sync flush on page hide. The Firestore SDK queues this write to its
+  // IndexedDB cache synchronously enough that even if the network call
+  // doesn't finish before tab close, the write is durable locally and will
+  // replay on reconnect. Better than losing it to a pure-network race.
   useEffect(() => {
     const onUnload = () => {
-      // Best-effort sync flush — modern browsers give a brief window for
-      // network calls during pagehide. saveCloudDraftV3 uses fetch under the
-      // hood via the Firestore SDK; we deliberately don't await it.
-      flushCloud();
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+      void performSave();
     };
     window.addEventListener('pagehide', onUnload);
     window.addEventListener('beforeunload', onUnload);
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') onUnload();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       window.removeEventListener('pagehide', onUnload);
       window.removeEventListener('beforeunload', onUnload);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [flushCloud]);
+  }, [performSave]);
 }
 
 // Strip File objects (not JSON-serializable). Photo previews (data URLs) survive.

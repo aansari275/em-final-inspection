@@ -1,6 +1,8 @@
 import { initializeApp } from 'firebase/app';
 import {
-  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   collection,
   addDoc,
   getDocs,
@@ -59,7 +61,18 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+
+// Firestore with offline persistence. Why: the V3 form autosaves to the cloud
+// only — no localStorage layer. If the inspector loses signal, IndexedDB
+// queues pending writes and replays on reconnect, so they get "saves to
+// cloud" semantics even when offline. persistentMultipleTabManager lets the
+// PWA + a browser tab share the cache without conflict.
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager(),
+  }),
+});
+
 export const storage = getStorage(app);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
