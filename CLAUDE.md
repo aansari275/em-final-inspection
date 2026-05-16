@@ -55,15 +55,21 @@ Subject line: `Final Inspection: <BUYER> / <OPS> / <ARTICLE> - <DESIGN> [PASS|FA
 ### OPS roll-up
 `Submit OPS Summary Report` button (enabled once every article has been submitted at least once) queries `final-inspections` where `opsRollupGroupId == opsNo`, builds a summary HTML email listing every article with PASS/FAIL + Storage PDF download link, sends via the same retry-able function.
 
-### Autosave + draft restore
-- `useAutoSaveV3` hook in the V3 provider debounces 800ms after any data change, serializes the form state (File objects stripped, previews preserved) to `localStorage` under key `final_inspection_v3_draft`, dispatches `MARK_SAVED` with a timestamp.
+### Autosave + draft restore (cloud-only, 2026-05-16)
+**No localStorage layer.** localStorage doesn't survive device wipe / browser replacement / wrong-browser opens, which is the whole point of autosave for QC inspectors swapping devices. Single-tier cloud autosave.
+
+- `useAutoSaveV3` debounces **1.5s** after any change and writes the serialized state (File objects stripped, previews preserved) to Firestore `final_inspection_v3_drafts/{opsNo}` via `saveCloudDraftV3` (`src/lib/v3CloudDraft.ts`). One in-flight save per touched-snapshot; the `inflightTouchedAtRef` guard prevents re-saving the same state.
+- Firestore is initialized with `persistentLocalCache` + `persistentMultipleTabManager` (see `src/lib/firebase.ts`). When the inspector is offline, IndexedDB queues the write and replays it on reconnect — so cloud autosave is also the offline autosave.
+- Flush on `pagehide` / `beforeunload` / `visibilitychange === hidden` fires `performSave` synchronously. The Firestore SDK queues to IndexedDB synchronously enough that even if the network call doesn't finish before tab close, the write is durable locally.
+- Drafts are NOT auto-rehydrated on mount. Inspector pulls a draft via the `/recover` route which lists every cloud draft (device-portable) and writes the chosen snapshot into the form on confirm.
 - `SaveStatusIndicator` above the active size renders `Saving…` / `All size details saved · Xs ago` / `Unsaved changes` / `Save error: <msg>`. Refreshes every 5s.
-- On page mount, `loadInitialStateFromStorage()` rehydrates any draft so refreshes don't lose work.
-- `Start new inspection` button under OPS Lookup wipes localStorage + dispatches `RESET`.
+- `Start new inspection` button deletes the cloud draft for the current OPS FIRST (via `deleteCloudDraftV3`), then dispatches `RESET`. Without the delete, reopening the same OPS would silently restore the discarded work.
 
 ### Files
 - `src/types/v3.ts` — V3 types + `buildArticleSkeletonFromOps`, `getIncompleteSizes`, `computeArticleResult`, `computeOpsResult`
-- `src/context/InspectionFormContextV3.tsx` — `InspectionFormProviderV3`, `useInspectionFormV3`, `useV2CompatDispatch` adapter (lets existing `SizeInspectionPanel` work inside V3 tabs unchanged), autosave hook, localStorage restore
+- `src/context/InspectionFormContextV3.tsx` — `InspectionFormProviderV3`, `useInspectionFormV3`, `useV2CompatDispatch` adapter (lets existing `SizeInspectionPanel` work inside V3 tabs unchanged), cloud autosave hook (`useAutoSaveV3`)
+- `src/lib/v3CloudDraft.ts` — `saveCloudDraftV3`, `loadCloudDraftV3`, `deleteCloudDraftV3`, `listCloudDraftsV3` — wraps Firestore `final_inspection_v3_drafts/{opsNo}` reads/writes
+- `src/lib/firebase.ts` — Firestore initialized with `persistentLocalCache({ tabManager: persistentMultipleTabManager() })` for offline write queue
 - `src/components/FinalInspectionFormV3.tsx` — top-level form (OPS lookup + hierarchy + roll-up button)
 - `src/components/v3/` — `CollapsibleHeader`, `ArticleAccordionList`, `ArticleAccordion`, `ArticleAqlBlock`, `ColorAccordion`, `SizeTabBar`, `SubmitArticleButton`, `PendingSizesPromptModal`, `SubmitOpsRollupButton`, `SaveStatusIndicator`
 - `src/lib/v3SubmitFlow.ts` — `submitArticleV3` + `submitOpsRollupV3` (reuses `buildV2EmailHtml`, `stripFilesFromSizes` exported from `FinalInspectionForm.tsx`)
